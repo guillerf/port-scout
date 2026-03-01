@@ -695,8 +695,63 @@ select {
 .editable-card-body {
   flex: 1;
   min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.editable-card-info {
   display: grid;
   gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.editable-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-card);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.ghost-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ghost-icon-btn:hover {
+  background: var(--color-bg-btn-secondary);
+  color: var(--color-text-heading);
+}
+
+.ghost-icon-btn.danger:hover {
+  background: var(--color-bg-danger-pill);
+  color: var(--color-text-danger-pill);
+}
+
+.ghost-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .read-only-row {

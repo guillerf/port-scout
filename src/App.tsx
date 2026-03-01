@@ -10,6 +10,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import {
+  Check,
   ChevronLeft,
   ExternalLink,
   GitBranch,
@@ -19,6 +20,9 @@ import {
   Settings as SettingsIcon,
   Square,
   Sun,
+  Trash2,
+  Settings2,
+  X,
 } from 'lucide-react';
 import type { DragEndEvent } from '@dnd-kit/core';
 import {
@@ -133,48 +137,54 @@ function SortableProjectCard({
         ⠿
       </button>
       <div className="editable-card-body">
-        <div className="read-only-row">
-          <strong>{project.name}</strong>
-          <span>{project.path}</span>
-          <span>:{project.port}</span>
+        <div className="editable-card-info">
+          <div className="read-only-row">
+            <strong>{project.name}</strong>
+            <span>{project.path}</span>
+            <span>:{project.port}</span>
+          </div>
         </div>
 
-        <div className="inline-actions">
+        <div className="editable-card-actions">
           <button
-            className="secondary-btn"
+            className="ghost-icon-btn"
             type="button"
+            title="Edit"
             disabled={busy}
             onClick={() => beginProjectDraft(project.id)}
           >
-            Edit
+            <Settings2 size={14} />
           </button>
           {confirmRemoveProjectId === project.id ? (
-            <>
+            <div className="confirm-actions">
               <button
-                className="link-btn danger"
+                className="ghost-icon-btn danger"
                 type="button"
+                title="Confirm remove"
                 disabled={busy}
                 onClick={() => void handleConfirmRemoveProject(project.id)}
               >
-                Confirm remove
+                <Check size={14} />
               </button>
               <button
-                className="link-btn"
+                className="ghost-icon-btn"
                 type="button"
+                title="Cancel remove"
                 disabled={busy}
                 onClick={() => setConfirmRemoveProjectId(null)}
               >
-                Cancel remove
+                <X size={14} />
               </button>
-            </>
+            </div>
           ) : (
             <button
-              className="link-btn danger"
+              className="ghost-icon-btn danger"
               type="button"
+              title="Remove"
               disabled={busy}
               onClick={() => setConfirmRemoveProjectId(project.id)}
             >
-              Remove
+              <Trash2 size={14} />
             </button>
           )}
         </div>
@@ -660,7 +670,7 @@ export default function App() {
                     if (draft) {
                       return (
                         <SortableDraftCard id={project.id} key={project.id}>
-                          <div className="editable-card-body">
+                          <div className="editable-card-info">
                             <label>
                               Name
                               <input
