@@ -9,12 +9,32 @@ import type {
   ProjectDraft,
   ProjectStatus,
   Settings,
+  ThemeMode,
   Toast,
   UpdateProjectInput,
 } from './types';
 
+const THEME_KEY = 'theme';
+
+function readStoredTheme(): ThemeMode {
+  const stored = localStorage.getItem(THEME_KEY);
+  if (stored === 'light' || stored === 'dark' || stored === 'system') {
+    return stored;
+  }
+  return 'system';
+}
+
+function applyThemeToDOM(mode: ThemeMode): void {
+  if (mode === 'system') {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.setAttribute('data-theme', mode);
+  }
+}
+
 interface AppStore {
   activeTab: ActiveTab;
+  themeMode: ThemeMode;
   projects: Project[];
   projectDrafts: Record<string, ProjectDraft>;
   statusByProject: Record<string, ProjectStatus>;
@@ -24,6 +44,7 @@ interface AppStore {
   busyByProject: Record<string, boolean>;
   toast: Toast | null;
   setActiveTab: (tab: ActiveTab) => void;
+  setThemeMode: (mode: ThemeMode) => void;
   beginProjectDraft: (projectId: string) => void;
   updateProjectDraft: (projectId: string, patch: Partial<ProjectDraft>) => void;
   cancelProjectDraft: (projectId: string) => void;
@@ -67,8 +88,13 @@ const errorMessage = (error: unknown): string => {
 let toastId = 0;
 let reorderSeq = 0;
 
+// Apply stored theme immediately on module load (before first render)
+const initialTheme = readStoredTheme();
+applyThemeToDOM(initialTheme);
+
 export const useAppStore = create<AppStore>((set, get) => ({
   activeTab: 'projects',
+  themeMode: initialTheme,
   projects: [],
   projectDrafts: {},
   statusByProject: {},
@@ -80,6 +106,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   setActiveTab: (tab) => {
     set({ activeTab: tab });
+  },
+
+  setThemeMode: (mode) => {
+    localStorage.setItem(THEME_KEY, mode);
+    applyThemeToDOM(mode);
+    set({ themeMode: mode });
   },
 
   beginProjectDraft: (projectId) => {

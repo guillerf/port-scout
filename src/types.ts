@@ -1,5 +1,7 @@
 export type ActiveTab = 'projects' | 'settings';
 
+export type ThemeMode = 'light' | 'dark' | 'system';
+
 export interface Project {
   id: string;
   name: string;

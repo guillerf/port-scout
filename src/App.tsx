@@ -9,6 +9,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import { Monitor, Moon, Sun } from 'lucide-react';
 import type { DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -26,6 +27,7 @@ import type {
   PortDetectionResult,
   PortSource,
   Project,
+  ThemeMode,
 } from './types';
 
 const REFRESH_MS = 5000;
@@ -200,6 +202,7 @@ export default function App() {
     loading,
     checkingUpdates,
     busyByProject,
+    themeMode,
     toast,
     setActiveTab,
     beginProjectDraft,
@@ -214,6 +217,7 @@ export default function App() {
     openProject,
     killProject,
     setAutostart,
+    setThemeMode,
     checkForUpdates,
     hideMainWindow,
     quitApp,
@@ -760,6 +764,28 @@ export default function App() {
 
         <section className="settings-section compact">
           <h2>Application</h2>
+
+          <div className="settings-subsection">
+            <h3>Appearance</h3>
+            <div className="theme-toggle">
+              {([
+                { mode: 'light', icon: <Sun size={14} />, label: 'Light' },
+                { mode: 'dark',  icon: <Moon size={14} />, label: 'Dark'  },
+                { mode: 'system', icon: <Monitor size={14} />, label: 'System' },
+              ] as { mode: ThemeMode; icon: ReactNode; label: string }[]).map(({ mode, icon, label }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  title={label}
+                  className={themeMode === mode ? 'active' : ''}
+                  onClick={() => setThemeMode(mode)}
+                >
+                  {icon}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <label className="toggle-row">
             <span>Start at login</span>
             <input
