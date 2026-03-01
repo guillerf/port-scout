@@ -2,7 +2,6 @@
   color: #e9edf6;
   background: transparent;
   font-family: 'SF Pro Text', 'SF Pro Display', 'Segoe UI', sans-serif;
-  --rail-width: clamp(44px, 14vw, 56px);
   --panel-radius: clamp(10px, 2.2vw, 16px);
   --title-size: clamp(20px, 5.2vw, 34px);
   --card-title-size: clamp(15px, 3.8vw, 24px);
@@ -44,43 +43,18 @@ select {
   height: 100%;
   border-radius: var(--panel-radius);
   overflow: hidden;
-  display: grid;
-  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   border: 0;
   background: radial-gradient(circle at 5% 4%, #242732 0%, #1a1c24 46%, #13151c 100%);
   box-shadow: 0 16px 28px rgba(0, 0, 0, 0.35);
 }
 
-.icon-rail {
-  border-right: 1px solid #2a2d37;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: clamp(6px, 1.6vw, 10px);
-  padding: clamp(8px, 1.8vw, 12px) 0;
-  background: linear-gradient(180deg, #151821, #10131a);
-}
-
-.rail-btn {
-  width: clamp(28px, 6.6vw, 36px);
-  height: clamp(28px, 6.6vw, 36px);
-  border-radius: clamp(9px, 1.8vw, 12px);
-  border: 1px solid #303444;
-  background: #1d2029;
-  color: #8b93a9;
-  font-size: clamp(14px, 2.6vw, 16px);
-  cursor: pointer;
-}
-
-.rail-btn.active {
-  color: #b6ff4e;
-  border-color: #6cbe1d;
-  box-shadow: inset 0 0 0 1px rgba(160, 230, 68, 0.25);
-}
-
 .content-panel {
   min-width: 0;
   min-height: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .view {
@@ -316,6 +290,13 @@ select {
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.action-btn:first-of-type {
+  margin-top: 0;
 }
 
 .settings-form {
@@ -427,8 +408,9 @@ select {
 }
 
 .primary-btn {
-  background: #9cec37;
-  color: #11160f;
+  background: #3d4663;
+  color: #eef1fb;
+  border: 1px solid #525d80;
 }
 
 .secondary-btn {
@@ -516,10 +498,6 @@ select {
 }
 
 @media (max-width: 520px) {
-  .utility-panel {
-    --rail-width: 42px;
-  }
-
   .view-header h1 {
     letter-spacing: -0.015em;
   }
