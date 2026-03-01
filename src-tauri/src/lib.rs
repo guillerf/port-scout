@@ -230,23 +230,37 @@ fn reorder_projects(
         .lock()
         .map_err(|_| "projects lock poisoned")?;
 
-    let mut reordered: Vec<Project> = Vec::with_capacity(projects.len());
-    for id in &project_ids {
-        if let Some(project) = projects.iter().find(|p| &p.id == id) {
-            reordered.push(project.clone());
-        }
-    }
-    // Append any projects not mentioned in project_ids (safety net)
-    for project in projects.iter() {
-        if !project_ids.contains(&project.id) {
-            reordered.push(project.clone());
+    // Drain existing projects into an index-addressable vec to preserve original order.
+    let mut all_projects: Vec<Option<Project>> = projects.drain(..).map(Some).collect();
+    let mut index_by_id: HashMap<String, usize> = HashMap::with_capacity(all_projects.len());
+    for (idx, maybe) in all_projects.iter().enumerate() {
+        if let Some(p) = maybe {
+            index_by_id.insert(p.id.clone(), idx);
         }
     }
 
-    *projects = reordered.clone();
+    let mut reordered: Vec<Project> = Vec::with_capacity(all_projects.len());
+
+    // First, push projects in the explicit order given by project_ids.
+    for id in &project_ids {
+        if let Some(&idx) = index_by_id.get(id) {
+            if let Some(project) = all_projects[idx].take() {
+                reordered.push(project);
+            }
+        }
+    }
+
+    // Append any projects not mentioned in project_ids, preserving original order.
+    for maybe in all_projects {
+        if let Some(project) = maybe {
+            reordered.push(project);
+        }
+    }
+
+    *projects = reordered;
     save_projects(&app, &projects)?;
 
-    Ok(reordered)
+    Ok(projects.clone())
 }
 
 #[tauri::command]
