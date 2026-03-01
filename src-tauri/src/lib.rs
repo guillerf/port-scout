@@ -220,6 +220,50 @@ fn remove_project(
 }
 
 #[tauri::command]
+fn reorder_projects(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    project_ids: Vec<String>,
+) -> Result<Vec<Project>, String> {
+    let mut projects = state
+        .projects
+        .lock()
+        .map_err(|_| "projects lock poisoned")?;
+
+    // Drain existing projects into an index-addressable vec to preserve original order.
+    let mut all_projects: Vec<Option<Project>> = projects.drain(..).map(Some).collect();
+    let mut index_by_id: HashMap<String, usize> = HashMap::with_capacity(all_projects.len());
+    for (idx, maybe) in all_projects.iter().enumerate() {
+        if let Some(p) = maybe {
+            index_by_id.insert(p.id.clone(), idx);
+        }
+    }
+
+    let mut reordered: Vec<Project> = Vec::with_capacity(all_projects.len());
+
+    // First, push projects in the explicit order given by project_ids.
+    for id in &project_ids {
+        if let Some(&idx) = index_by_id.get(id) {
+            if let Some(project) = all_projects[idx].take() {
+                reordered.push(project);
+            }
+        }
+    }
+
+    // Append any projects not mentioned in project_ids, preserving original order.
+    for maybe in all_projects {
+        if let Some(project) = maybe {
+            reordered.push(project);
+        }
+    }
+
+    *projects = reordered;
+    save_projects(&app, &projects)?;
+
+    Ok(projects.clone())
+}
+
+#[tauri::command]
 fn refresh_status(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1422,6 +1466,7 @@ pub fn run() {
             add_project,
             update_project,
             remove_project,
+            reorder_projects,
             refresh_status,
             open_project_url,
             kill_project_port,
