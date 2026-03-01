@@ -9,7 +9,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { ChevronLeft, Monitor, Moon, RefreshCw, Settings as SettingsIcon, Sun } from 'lucide-react';
 import type { DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -473,10 +473,10 @@ export default function App() {
         <h1>Projects</h1>
         <div className="view-actions">
           <button className="icon-btn" onClick={() => void refreshStatus()} type="button" title="Refresh status">
-            ↻
+            <RefreshCw size={18} />
           </button>
           <button className="icon-btn" onClick={() => setActiveTab('settings')} type="button" title="Settings">
-            ⚙
+            <SettingsIcon size={18} />
           </button>
         </div>
       </header>
@@ -540,7 +540,7 @@ export default function App() {
     <section className="view settings-view">
       <header className="view-header" data-tauri-drag-region>
         <button className="icon-btn back-btn" onClick={() => setActiveTab('projects')} type="button" title="Back to projects">
-          ←
+          <ChevronLeft size={20} />
         </button>
         <h1>Settings</h1>
         <div className="view-actions" />
