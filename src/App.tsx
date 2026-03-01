@@ -322,8 +322,8 @@ export default function App() {
           <button className="icon-btn" onClick={() => void refreshStatus()} type="button" title="Refresh status">
             ↻
           </button>
-          <button className="text-btn" onClick={() => void quitApp()} type="button">
-            Quit
+          <button className="icon-btn" onClick={() => setActiveTab('settings')} type="button" title="Settings">
+            ⚙
           </button>
         </div>
       </header>
@@ -386,49 +386,17 @@ export default function App() {
   const renderSettingsTab = () => (
     <section className="view settings-view">
       <header className="view-header" data-tauri-drag-region>
+        <button className="icon-btn back-btn" onClick={() => setActiveTab('projects')} type="button" title="Back to projects">
+          ←
+        </button>
         <h1>Settings</h1>
-        <div className="view-actions">
-          <button className="text-btn" onClick={() => void quitApp()} type="button">
-            Quit
-          </button>
-        </div>
+        <div className="view-actions" />
       </header>
 
       <div className="scroll-area settings-scroll">
-        <section className="settings-section compact">
-          <h2>Application</h2>
-          <label className="toggle-row">
-            <span>Start at login</span>
-            <input
-              type="checkbox"
-              checked={settings?.autostartEnabled ?? false}
-              onChange={(event) => void setAutostart(event.target.checked)}
-            />
-          </label>
-
-          <button
-            className="action-btn"
-            type="button"
-            onClick={() => void checkForUpdates()}
-            disabled={checkingUpdates}
-          >
-            {checkingUpdates ? 'Checking updates...' : 'Check updates'}
-          </button>
-        </section>
-
         <section className="settings-section">
           <h2>Add project</h2>
           <form className="settings-form" onSubmit={handleAddProject}>
-            <label>
-              Name
-              <input
-                value={newName}
-                onChange={(event) => setNewName(event.target.value)}
-                placeholder="api"
-                required
-              />
-            </label>
-
             <label>
               Path
               <div className="path-row">
@@ -442,6 +410,16 @@ export default function App() {
                   Browse
                 </button>
               </div>
+            </label>
+
+            <label>
+              Name
+              <input
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                placeholder="api"
+                required
+              />
             </label>
 
             <label>
@@ -655,6 +633,35 @@ export default function App() {
             </div>
           )}
         </section>
+
+        <section className="settings-section compact">
+          <h2>Application</h2>
+          <label className="toggle-row">
+            <span>Start at login</span>
+            <input
+              type="checkbox"
+              checked={settings?.autostartEnabled ?? false}
+              onChange={(event) => void setAutostart(event.target.checked)}
+            />
+          </label>
+
+          <button
+            className="action-btn"
+            type="button"
+            onClick={() => void checkForUpdates()}
+            disabled={checkingUpdates}
+          >
+            {checkingUpdates ? 'Checking updates...' : 'Check updates'}
+          </button>
+
+          <button
+            className="action-btn action-btn-quit"
+            type="button"
+            onClick={() => void quitApp()}
+          >
+            Quit
+          </button>
+        </section>
       </div>
     </section>
   );
@@ -662,25 +669,6 @@ export default function App() {
   return (
     <main className="utility-shell">
       <section className="utility-panel">
-        <aside className="icon-rail" data-tauri-drag-region>
-          <button
-            className={activeTab === 'projects' ? 'rail-btn active' : 'rail-btn'}
-            onClick={() => setActiveTab('projects')}
-            type="button"
-            title="Projects"
-          >
-            ●
-          </button>
-          <button
-            className={activeTab === 'settings' ? 'rail-btn active' : 'rail-btn'}
-            onClick={() => setActiveTab('settings')}
-            type="button"
-            title="Settings"
-          >
-            ⚙
-          </button>
-        </aside>
-
         <div className="content-panel">
           {activeTab === 'projects' ? renderProjectsTab() : renderSettingsTab()}
         </div>
