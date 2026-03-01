@@ -220,6 +220,36 @@ fn remove_project(
 }
 
 #[tauri::command]
+fn reorder_projects(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    project_ids: Vec<String>,
+) -> Result<Vec<Project>, String> {
+    let mut projects = state
+        .projects
+        .lock()
+        .map_err(|_| "projects lock poisoned")?;
+
+    let mut reordered: Vec<Project> = Vec::with_capacity(projects.len());
+    for id in &project_ids {
+        if let Some(project) = projects.iter().find(|p| &p.id == id) {
+            reordered.push(project.clone());
+        }
+    }
+    // Append any projects not mentioned in project_ids (safety net)
+    for project in projects.iter() {
+        if !project_ids.contains(&project.id) {
+            reordered.push(project.clone());
+        }
+    }
+
+    *projects = reordered.clone();
+    save_projects(&app, &projects)?;
+
+    Ok(reordered)
+}
+
+#[tauri::command]
 fn refresh_status(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1422,6 +1452,7 @@ pub fn run() {
             add_project,
             update_project,
             remove_project,
+            reorder_projects,
             refresh_status,
             open_project_url,
             kill_project_port,

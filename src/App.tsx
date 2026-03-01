@@ -1,7 +1,24 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from './store';
 import type {
   PortCandidate,
@@ -40,10 +57,6 @@ function relativeTime(iso: string | null): string {
   return `${days}d`;
 }
 
-function sortProjects(left: Project, right: Project): number {
-  return left.name.localeCompare(right.name);
-}
-
 function sourceLabel(source: PortSource): string {
   switch (source) {
     case 'env':
@@ -58,6 +71,106 @@ function sourceLabel(source: PortSource): string {
       return 'compose';
   }
 }
+
+// ---------------------------------------------------------------------------
+// SortableProjectCard — read-only card with dnd-kit drag handle
+// ---------------------------------------------------------------------------
+
+interface SortableProjectCardProps {
+  project: Project;
+  busy: boolean;
+  confirmRemoveProjectId: string | null;
+  beginProjectDraft: (id: string) => void;
+  setConfirmRemoveProjectId: (id: string | null) => void;
+  handleConfirmRemoveProject: (id: string) => Promise<void>;
+}
+
+function SortableProjectCard({
+  project,
+  busy,
+  confirmRemoveProjectId,
+  beginProjectDraft,
+  setConfirmRemoveProjectId,
+  handleConfirmRemoveProject,
+}: SortableProjectCardProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: project.id,
+  });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  };
+
+  return (
+    <article
+      className="editable-card"
+      ref={setNodeRef}
+      style={style}
+    >
+      <span
+        className="drag-handle"
+        title="Drag to reorder"
+        {...attributes}
+        {...listeners}
+      >
+        ⠿
+      </span>
+      <div className="editable-card-body">
+        <div className="read-only-row">
+          <strong>{project.name}</strong>
+          <span>{project.path}</span>
+          <span>:{project.port}</span>
+        </div>
+
+        <div className="inline-actions">
+          <button
+            className="secondary-btn"
+            type="button"
+            disabled={busy}
+            onClick={() => beginProjectDraft(project.id)}
+          >
+            Edit
+          </button>
+          {confirmRemoveProjectId === project.id ? (
+            <>
+              <button
+                className="link-btn danger"
+                type="button"
+                disabled={busy}
+                onClick={() => void handleConfirmRemoveProject(project.id)}
+              >
+                Confirm remove
+              </button>
+              <button
+                className="link-btn"
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmRemoveProjectId(null)}
+              >
+                Cancel remove
+              </button>
+            </>
+          ) : (
+            <button
+              className="link-btn danger"
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmRemoveProjectId(project.id)}
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
 
 export default function App() {
   const {
@@ -79,6 +192,7 @@ export default function App() {
     refreshStatus,
     addProject,
     removeProject,
+    reorderProjects,
     openProject,
     killProject,
     setAutostart,
@@ -100,6 +214,12 @@ export default function App() {
   const detectRequestRef = useRef(0);
   const manualPortEditedRef = useRef(false);
   const skipNextDebouncedDetectRef = useRef(false);
+
+  // dnd-kit sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   useEffect(() => {
     void hydrate();
@@ -154,8 +274,6 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [toast, clearToast]);
-
-  const sortedProjects = useMemo(() => [...projects].sort(sortProjects), [projects]);
 
   const detectPortsForPath = async (path: string) => {
     const trimmedPath = path.trim();
@@ -314,6 +432,19 @@ export default function App() {
     setConfirmRemoveProjectId((current) => (current === projectId ? null : current));
   };
 
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const ids = projects.map((p) => p.id);
+    const oldIndex = ids.indexOf(active.id as string);
+    const newIndex = ids.indexOf(over.id as string);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(ids, oldIndex, newIndex);
+    void reorderProjects(reordered);
+  };
+
   const renderProjectsTab = () => (
     <section className="view projects-view">
       <header className="view-header" data-tauri-drag-region>
@@ -329,10 +460,10 @@ export default function App() {
       </header>
 
       <div className="scroll-area">
-        {sortedProjects.length === 0 ? (
+        {projects.length === 0 ? (
           <p className="empty">No configured projects yet. Open Settings to add your first one.</p>
         ) : (
-          sortedProjects.map((project) => {
+          projects.map((project) => {
             const status = statusByProject[project.id];
             const isRunning = !!status?.isRunning;
             const busy = !!busyByProject[project.id];
@@ -475,162 +606,137 @@ export default function App() {
 
         <section className="settings-section">
           <h2>Configured projects</h2>
-          {sortedProjects.length === 0 ? (
+          {projects.length === 0 ? (
             <p className="empty small">No projects configured.</p>
           ) : (
-            <div className="editable-list">
-              {sortedProjects.map((project) => {
-                const draft = projectDrafts[project.id];
-                const busy = !!busyByProject[project.id];
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={projects.map((p) => p.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="editable-list">
+                  {projects.map((project) => {
+                    const draft = projectDrafts[project.id];
+                    const busy = !!busyByProject[project.id];
 
-                if (draft) {
-                  return (
-                    <article className="editable-card" key={project.id}>
-                      <label>
-                        Name
-                        <input
-                          value={draft.name}
-                          onChange={(event) =>
-                            updateProjectDraft(project.id, { name: event.target.value })
-                          }
-                          disabled={busy}
-                        />
-                      </label>
+                    if (draft) {
+                      return (
+                        <article className="editable-card" key={project.id}>
+                          <div className="editable-card-body">
+                            <label>
+                              Name
+                              <input
+                                value={draft.name}
+                                onChange={(event) =>
+                                  updateProjectDraft(project.id, { name: event.target.value })
+                                }
+                                disabled={busy}
+                              />
+                            </label>
 
-                      <label>
-                        Path
-                        <div className="path-row">
-                          <input
-                            value={draft.path}
-                            onChange={(event) =>
-                              updateProjectDraft(project.id, { path: event.target.value })
-                            }
-                            disabled={busy}
-                          />
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void handleBrowseDraftPath(project.id)}
-                          >
-                            Browse
-                          </button>
-                        </div>
-                      </label>
+                            <label>
+                              Path
+                              <div className="path-row">
+                                <input
+                                  value={draft.path}
+                                  onChange={(event) =>
+                                    updateProjectDraft(project.id, { path: event.target.value })
+                                  }
+                                  disabled={busy}
+                                />
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void handleBrowseDraftPath(project.id)}
+                                >
+                                  Browse
+                                </button>
+                              </div>
+                            </label>
 
-                      <label>
-                        Port
-                        <input
-                          value={draft.port}
-                          onChange={(event) =>
-                            updateProjectDraft(project.id, { port: event.target.value })
-                          }
-                          inputMode="numeric"
-                          disabled={busy}
-                        />
-                      </label>
+                            <label>
+                              Port
+                              <input
+                                value={draft.port}
+                                onChange={(event) =>
+                                  updateProjectDraft(project.id, { port: event.target.value })
+                                }
+                                inputMode="numeric"
+                                disabled={busy}
+                              />
+                            </label>
 
-                      <div className="inline-actions">
-                        <button
-                          className="primary-btn"
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void saveProjectDraft(project.id)}
-                        >
-                          Save
-                        </button>
-                        <button
-                          className="secondary-btn"
-                          type="button"
-                          disabled={busy}
-                          onClick={() => cancelProjectDraft(project.id)}
-                        >
-                          Cancel
-                        </button>
-                        {confirmRemoveProjectId === project.id ? (
-                          <>
-                            <button
-                              className="link-btn danger"
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void handleConfirmRemoveProject(project.id)}
-                            >
-                              Confirm remove
-                            </button>
-                            <button
-                              className="link-btn"
-                              type="button"
-                              disabled={busy}
-                              onClick={() => setConfirmRemoveProjectId(null)}
-                            >
-                              Cancel remove
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            className="link-btn danger"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => setConfirmRemoveProjectId(project.id)}
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-                    </article>
-                  );
-                }
+                            <div className="inline-actions">
+                              <button
+                                className="primary-btn"
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void saveProjectDraft(project.id)}
+                              >
+                                Save
+                              </button>
+                              <button
+                                className="secondary-btn"
+                                type="button"
+                                disabled={busy}
+                                onClick={() => cancelProjectDraft(project.id)}
+                              >
+                                Cancel
+                              </button>
+                              {confirmRemoveProjectId === project.id ? (
+                                <>
+                                  <button
+                                    className="link-btn danger"
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => void handleConfirmRemoveProject(project.id)}
+                                  >
+                                    Confirm remove
+                                  </button>
+                                  <button
+                                    className="link-btn"
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => setConfirmRemoveProjectId(null)}
+                                  >
+                                    Cancel remove
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  className="link-btn danger"
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => setConfirmRemoveProjectId(project.id)}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    }
 
-                return (
-                  <article className="editable-card" key={project.id}>
-                    <div className="read-only-row">
-                      <strong>{project.name}</strong>
-                      <span>{project.path}</span>
-                      <span>:{project.port}</span>
-                    </div>
-
-                    <div className="inline-actions">
-                      <button
-                        className="secondary-btn"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => beginProjectDraft(project.id)}
-                      >
-                        Edit
-                      </button>
-                      {confirmRemoveProjectId === project.id ? (
-                        <>
-                          <button
-                            className="link-btn danger"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void handleConfirmRemoveProject(project.id)}
-                          >
-                            Confirm remove
-                          </button>
-                          <button
-                            className="link-btn"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => setConfirmRemoveProjectId(null)}
-                          >
-                            Cancel remove
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="link-btn danger"
-                          type="button"
-                          disabled={busy}
-                          onClick={() => setConfirmRemoveProjectId(project.id)}
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+                    return (
+                      <SortableProjectCard
+                        key={project.id}
+                        project={project}
+                        busy={busy}
+                        confirmRemoveProjectId={confirmRemoveProjectId}
+                        beginProjectDraft={beginProjectDraft}
+                        setConfirmRemoveProjectId={setConfirmRemoveProjectId}
+                        handleConfirmRemoveProject={handleConfirmRemoveProject}
+                      />
+                    );
+                  })}
+                </div>
+              </SortableContext>
+            </DndContext>
           )}
         </section>
 

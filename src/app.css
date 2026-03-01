@@ -428,6 +428,34 @@ select {
   border-radius: 12px;
   background: #151923;
   padding: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.drag-handle {
+  flex-shrink: 0;
+  color: #4a5168;
+  font-size: 14px;
+  line-height: 1;
+  cursor: grab;
+  padding: 2px 2px 0;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.drag-handle:hover {
+  color: #7a84a0;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.editable-card-body {
+  flex: 1;
+  min-width: 0;
   display: grid;
   gap: 6px;
 }

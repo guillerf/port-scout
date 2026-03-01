@@ -33,6 +33,7 @@ interface AppStore {
   addProject: (input: AddProjectInput) => Promise<void>;
   updateProject: (input: UpdateProjectInput) => Promise<boolean>;
   removeProject: (projectId: string) => Promise<void>;
+  reorderProjects: (projectIds: string[]) => Promise<void>;
   openProject: (projectId: string) => Promise<void>;
   killProject: (projectId: string) => Promise<KillResult | null>;
   setAutostart: (enabled: boolean) => Promise<void>;
@@ -62,9 +63,6 @@ const errorMessage = (error: unknown): string => {
   }
   return 'Unexpected error';
 };
-
-const sortProjects = (projects: Project[]): Project[] =>
-  [...projects].sort((left, right) => left.name.localeCompare(right.name));
 
 let toastId = 0;
 
@@ -164,7 +162,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ]);
 
       set({
-        projects: sortProjects(projects),
+        projects: projects,
         statusByProject: toStatusMap(statuses),
         settings,
         loading: false,
@@ -202,7 +200,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const project = await invoke<Project>('add_project', { input });
 
       set((state) => ({
-        projects: sortProjects([...state.projects, project]),
+        projects: [...state.projects, project],
         loading: false,
         toast: {
           id: ++toastId,
@@ -241,9 +239,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         return {
           busyByProject: nextBusy,
           projectDrafts: nextDrafts,
-          projects: sortProjects(
-            state.projects.map((item) => (item.id === project.id ? project : item)),
-          ),
+          projects: state.projects.map((item) => (item.id === project.id ? project : item)),
           toast: {
             id: ++toastId,
             tone: 'success',
@@ -311,6 +307,33 @@ export const useAppStore = create<AppStore>((set, get) => ({
           message: errorMessage(error),
         },
       }));
+    }
+  },
+
+  reorderProjects: async (projectIds) => {
+    // Optimistic update
+    set((state) => {
+      const reordered = projectIds
+        .map((id) => state.projects.find((p) => p.id === id))
+        .filter((p): p is Project => p !== undefined);
+      // Append any not in the list
+      for (const p of state.projects) {
+        if (!projectIds.includes(p.id)) reordered.push(p);
+      }
+      return { projects: reordered };
+    });
+
+    try {
+      const projects = await invoke<Project[]>('reorder_projects', { projectIds });
+      set({ projects });
+    } catch (error) {
+      set({
+        toast: {
+          id: ++toastId,
+          tone: 'error',
+          message: errorMessage(error),
+        },
+      });
     }
   },
 
