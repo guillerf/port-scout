@@ -1669,18 +1669,28 @@ mod tests {
             return;
         }
 
-        let port = available_port();
+        let mut launched = None;
+        for _ in 0..3 {
+            let port = available_port();
+            let mut child = Command::new("python3")
+                .arg("-m")
+                .arg("http.server")
+                .arg(port.to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn dummy server");
 
-        let mut child = Command::new("python3")
-            .arg("-m")
-            .arg("http.server")
-            .arg(port.to_string())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn dummy server");
+            if wait_for_port(port, Duration::from_secs(10)) {
+                launched = Some((port, child));
+                break;
+            }
 
-        wait_for_port(port, Duration::from_secs(5));
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+
+        let (port, mut child) = launched.expect("dummy server should start listening");
 
         let pid = detect_listening_pid(port)
             .expect("detect port")
@@ -1719,15 +1729,15 @@ mod tests {
         listener.local_addr().expect("local addr").port()
     }
 
-    fn wait_for_port(port: u16, timeout: Duration) {
+    fn wait_for_port(port: u16, timeout: Duration) -> bool {
         let start = Instant::now();
         while start.elapsed() < timeout {
             if detect_listening_pid(port).ok().flatten().is_some() {
-                return;
+                return true;
             }
             thread::sleep(Duration::from_millis(100));
         }
 
-        panic!("timeout waiting for port {port} to start listening");
+        false
     }
 }
