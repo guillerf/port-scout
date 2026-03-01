@@ -448,6 +448,9 @@ select {
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
+  background: none;
+  border: none;
+  outline: none;
 }
 
 .drag-handle:hover {

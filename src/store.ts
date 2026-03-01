@@ -65,6 +65,7 @@ const errorMessage = (error: unknown): string => {
 };
 
 let toastId = 0;
+let reorderSeq = 0;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   activeTab: 'projects',
@@ -311,29 +312,42 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   reorderProjects: async (projectIds) => {
-    // Optimistic update
+    // Capture current order for rollback on failure
+    const previousProjects = get().projects;
+
+    // Optimistic update using Map/Set for O(n)
     set((state) => {
-      const reordered = projectIds
-        .map((id) => state.projects.find((p) => p.id === id))
-        .filter((p): p is Project => p !== undefined);
-      // Append any not in the list
+      const projectById = new Map(state.projects.map((p) => [p.id, p] as const));
+      const idsSet = new Set(projectIds);
+      const reordered: Project[] = [];
+      for (const id of projectIds) {
+        const p = projectById.get(id);
+        if (p) reordered.push(p);
+      }
       for (const p of state.projects) {
-        if (!projectIds.includes(p.id)) reordered.push(p);
+        if (!idsSet.has(p.id)) reordered.push(p);
       }
       return { projects: reordered };
     });
 
+    const seq = ++reorderSeq;
+
     try {
       const projects = await invoke<Project[]>('reorder_projects', { projectIds });
-      set({ projects });
+      if (seq === reorderSeq) {
+        set({ projects });
+      }
     } catch (error) {
-      set({
-        toast: {
-          id: ++toastId,
-          tone: 'error',
-          message: errorMessage(error),
-        },
-      });
+      if (seq === reorderSeq) {
+        set({
+          projects: previousProjects,
+          toast: {
+            id: ++toastId,
+            tone: 'error',
+            message: errorMessage(error),
+          },
+        });
+      }
     }
   },
 

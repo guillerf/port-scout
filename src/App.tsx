@@ -19,6 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { useAppStore } from './store';
 import type {
   PortCandidate,
@@ -97,7 +98,7 @@ function SortableProjectCard({
     id: project.id,
   });
 
-  const style: React.CSSProperties = {
+  const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : undefined,
@@ -109,14 +110,16 @@ function SortableProjectCard({
       ref={setNodeRef}
       style={style}
     >
-      <span
+      <button
         className="drag-handle"
+        type="button"
         title="Drag to reorder"
+        aria-label="Drag to reorder"
         {...attributes}
         {...listeners}
       >
         ⠿
-      </span>
+      </button>
       <div className="editable-card-body">
         <div className="read-only-row">
           <strong>{project.name}</strong>
@@ -164,6 +167,21 @@ function SortableProjectCard({
           )}
         </div>
       </div>
+    </article>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SortableDraftCard — registers disabled sortable so dnd-kit tracks position
+// ---------------------------------------------------------------------------
+
+function SortableDraftCard({ id, children }: { id: string; children: ReactNode }) {
+  // disabled: true keeps the card registered with dnd-kit (so collision detection
+  // and sorting around it works correctly) without making it draggable.
+  const { setNodeRef } = useSortable({ id, disabled: true });
+  return (
+    <article className="editable-card" ref={setNodeRef}>
+      {children}
     </article>
   );
 }
@@ -404,7 +422,7 @@ export default function App() {
     }
   };
 
-  const handleAddProject = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleAddProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const parsedPort = Number.parseInt(newPort, 10);
@@ -625,7 +643,7 @@ export default function App() {
 
                     if (draft) {
                       return (
-                        <article className="editable-card" key={project.id}>
+                        <SortableDraftCard id={project.id} key={project.id}>
                           <div className="editable-card-body">
                             <label>
                               Name
@@ -718,7 +736,7 @@ export default function App() {
                               )}
                             </div>
                           </div>
-                        </article>
+                        </SortableDraftCard>
                       );
                     }
 
