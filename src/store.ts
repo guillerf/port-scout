@@ -17,14 +17,19 @@ import type {
 const THEME_KEY = 'theme';
 
 function readStoredTheme(): ThemeMode {
-  const stored = localStorage.getItem(THEME_KEY);
-  if (stored === 'light' || stored === 'dark' || stored === 'system') {
-    return stored;
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark' || stored === 'system') {
+      return stored;
+    }
+  } catch {
+    // localStorage unavailable (SSR or storage access blocked)
   }
   return 'system';
 }
 
 function applyThemeToDOM(mode: ThemeMode): void {
+  if (typeof document === 'undefined') return;
   if (mode === 'system') {
     document.documentElement.removeAttribute('data-theme');
   } else {
@@ -109,7 +114,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   setThemeMode: (mode) => {
-    localStorage.setItem(THEME_KEY, mode);
+    try {
+      localStorage.setItem(THEME_KEY, mode);
+    } catch {
+      // localStorage unavailable (SSR or storage access blocked)
+    }
     applyThemeToDOM(mode);
     set({ themeMode: mode });
   },
