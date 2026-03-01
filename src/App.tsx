@@ -9,7 +9,17 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { ChevronLeft, Monitor, Moon, RefreshCw, Settings as SettingsIcon, Sun } from 'lucide-react';
+import {
+  ChevronLeft,
+  ExternalLink,
+  GitBranch,
+  Monitor,
+  Moon,
+  RefreshCw,
+  Settings as SettingsIcon,
+  Square,
+  Sun,
+} from 'lucide-react';
 import type { DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -502,25 +512,27 @@ export default function App() {
                     <button
                       className="danger-pill"
                       type="button"
+                      title="Stop project"
                       disabled={!isRunning || busy}
                       onClick={() => void killProject(project.id)}
                     >
-                      Stop
+                      <Square size={12} fill="currentColor" />
                     </button>
                     <button
                       className="neutral-pill"
                       type="button"
+                      title="Open project"
                       disabled={busy}
                       onClick={() => void openProject(project.id)}
                     >
-                      Open
+                      <ExternalLink size={12} />
                     </button>
                   </div>
                 </div>
 
                 <div className="project-meta">
                   <span className="meta-left">
-                    <span className="branch-icon">⑂</span>
+                    <span className="branch-icon"><GitBranch size={12} /></span>
                     {status?.branch ?? 'loading'}
                     <span className="port-label">:{project.port}</span>
                   </span>

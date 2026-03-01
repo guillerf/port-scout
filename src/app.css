@@ -404,6 +404,9 @@ select {
   font-weight: 700;
   cursor: pointer;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .danger-pill {
@@ -442,10 +445,13 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
 }
 
 .branch-icon {
   margin-right: 5px;
+  display: inline-flex;
 }
 
 .port-label {
