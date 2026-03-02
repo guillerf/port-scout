@@ -9,6 +9,21 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import {
+  Check,
+  ChevronLeft,
+  ExternalLink,
+  GitBranch,
+  Monitor,
+  Moon,
+  RefreshCw,
+  Settings as SettingsIcon,
+  Square,
+  Sun,
+  Trash2,
+  Settings2,
+  X,
+} from 'lucide-react';
 import type { DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -26,6 +41,7 @@ import type {
   PortDetectionResult,
   PortSource,
   Project,
+  ThemeMode,
 } from './types';
 
 const REFRESH_MS = 5000;
@@ -121,48 +137,54 @@ function SortableProjectCard({
         ⠿
       </button>
       <div className="editable-card-body">
-        <div className="read-only-row">
-          <strong>{project.name}</strong>
-          <span>{project.path}</span>
-          <span>:{project.port}</span>
+        <div className="editable-card-info">
+          <div className="read-only-row">
+            <strong>{project.name}</strong>
+            <span>{project.path}</span>
+            <span>:{project.port}</span>
+          </div>
         </div>
 
-        <div className="inline-actions">
+        <div className="editable-card-actions">
           <button
-            className="secondary-btn"
+            className="ghost-icon-btn"
             type="button"
+            title="Edit"
             disabled={busy}
             onClick={() => beginProjectDraft(project.id)}
           >
-            Edit
+            <Settings2 size={14} />
           </button>
           {confirmRemoveProjectId === project.id ? (
-            <>
+            <div className="confirm-actions">
               <button
-                className="link-btn danger"
+                className="ghost-icon-btn danger"
                 type="button"
+                title="Confirm remove"
                 disabled={busy}
                 onClick={() => void handleConfirmRemoveProject(project.id)}
               >
-                Confirm remove
+                <Check size={14} />
               </button>
               <button
-                className="link-btn"
+                className="ghost-icon-btn"
                 type="button"
+                title="Cancel remove"
                 disabled={busy}
                 onClick={() => setConfirmRemoveProjectId(null)}
               >
-                Cancel remove
+                <X size={14} />
               </button>
-            </>
+            </div>
           ) : (
             <button
-              className="link-btn danger"
+              className="ghost-icon-btn danger"
               type="button"
+              title="Remove"
               disabled={busy}
               onClick={() => setConfirmRemoveProjectId(project.id)}
             >
-              Remove
+              <Trash2 size={14} />
             </button>
           )}
         </div>
@@ -200,6 +222,7 @@ export default function App() {
     loading,
     checkingUpdates,
     busyByProject,
+    themeMode,
     toast,
     setActiveTab,
     beginProjectDraft,
@@ -214,6 +237,7 @@ export default function App() {
     openProject,
     killProject,
     setAutostart,
+    setThemeMode,
     checkForUpdates,
     hideMainWindow,
     quitApp,
@@ -469,10 +493,10 @@ export default function App() {
         <h1>Projects</h1>
         <div className="view-actions">
           <button className="icon-btn" onClick={() => void refreshStatus()} type="button" title="Refresh status">
-            ↻
+            <RefreshCw size={18} />
           </button>
           <button className="icon-btn" onClick={() => setActiveTab('settings')} type="button" title="Settings">
-            ⚙
+            <SettingsIcon size={18} />
           </button>
         </div>
       </header>
@@ -498,25 +522,27 @@ export default function App() {
                     <button
                       className="danger-pill"
                       type="button"
+                      title="Stop project"
                       disabled={!isRunning || busy}
                       onClick={() => void killProject(project.id)}
                     >
-                      Stop
+                      <Square size={12} fill="currentColor" />
                     </button>
                     <button
                       className="neutral-pill"
                       type="button"
+                      title="Open project"
                       disabled={busy}
                       onClick={() => void openProject(project.id)}
                     >
-                      Open
+                      <ExternalLink size={12} />
                     </button>
                   </div>
                 </div>
 
                 <div className="project-meta">
                   <span className="meta-left">
-                    <span className="branch-icon">⑂</span>
+                    <span className="branch-icon"><GitBranch size={12} /></span>
                     {status?.branch ?? 'loading'}
                     <span className="port-label">:{project.port}</span>
                   </span>
@@ -536,7 +562,7 @@ export default function App() {
     <section className="view settings-view">
       <header className="view-header" data-tauri-drag-region>
         <button className="icon-btn back-btn" onClick={() => setActiveTab('projects')} type="button" title="Back to projects">
-          ←
+          <ChevronLeft size={20} />
         </button>
         <h1>Settings</h1>
         <div className="view-actions" />
@@ -644,7 +670,7 @@ export default function App() {
                     if (draft) {
                       return (
                         <SortableDraftCard id={project.id} key={project.id}>
-                          <div className="editable-card-body">
+                          <div className="editable-card-info">
                             <label>
                               Name
                               <input
@@ -760,6 +786,28 @@ export default function App() {
 
         <section className="settings-section compact">
           <h2>Application</h2>
+
+          <div className="settings-subsection">
+            <h3>Appearance</h3>
+            <div className="theme-toggle">
+              {([
+                { mode: 'light', icon: <Sun size={14} />, label: 'Light' },
+                { mode: 'dark',  icon: <Moon size={14} />, label: 'Dark'  },
+                { mode: 'system', icon: <Monitor size={14} />, label: 'System' },
+              ] as { mode: ThemeMode; icon: ReactNode; label: string }[]).map(({ mode, icon, label }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  title={label}
+                  className={themeMode === mode ? 'active' : ''}
+                  onClick={() => setThemeMode(mode)}
+                >
+                  {icon}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <label className="toggle-row">
             <span>Start at login</span>
             <input
