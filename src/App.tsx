@@ -532,15 +532,6 @@ export default function App() {
                 : runState === 'ambiguous'
                   ? 'Port active (owner unclear)'
                   : null;
-            const stopTitle =
-              runState === 'owned'
-                ? 'Stop project'
-                : runState === 'owned-by-other'
-                  ? 'Cannot stop: owned by another configured project'
-                  : runState === 'ambiguous'
-                    ? 'Cannot stop: owner unclear'
-                    : 'Project is not running';
-
             return (
               <article className="project-card" key={project.id}>
                 <div className="project-row-top">
@@ -549,26 +540,28 @@ export default function App() {
                     <h2>{project.name}</h2>
                   </div>
 
-                  <div className="project-actions">
-                    <button
-                      className="danger-pill"
-                      type="button"
-                      title={stopTitle}
-                      disabled={!isRunning || busy}
-                      onClick={() => void killProject(project.id)}
-                    >
-                      <Square size={12} fill="currentColor" />
-                    </button>
-                    <button
-                      className="neutral-pill"
-                      type="button"
-                      title="Open project"
-                      disabled={busy}
-                      onClick={() => void openProject(project.id)}
-                    >
-                      <ExternalLink size={12} />
-                    </button>
-                  </div>
+                  {isRunning ? (
+                    <div className="project-actions">
+                      <button
+                        className="danger-pill"
+                        type="button"
+                        title="Stop project"
+                        disabled={busy}
+                        onClick={() => void killProject(project.id)}
+                      >
+                        <Square size={12} fill="currentColor" />
+                      </button>
+                      <button
+                        className="neutral-pill"
+                        type="button"
+                        title="Open project"
+                        disabled={busy}
+                        onClick={() => void openProject(project.id)}
+                      >
+                        <ExternalLink size={12} />
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="project-meta">
