@@ -89,6 +89,13 @@ function sourceLabel(source: PortSource): string {
   }
 }
 
+function sharedPortWarningText(names: string[]): string {
+  if (names.length === 1) {
+    return `Port is also configured for "${names[0]}".`;
+  }
+  return `Port is also configured for: ${names.join(', ')}.`;
+}
+
 // ---------------------------------------------------------------------------
 // SortableProjectCard — read-only card with dnd-kit drag handle
 // ---------------------------------------------------------------------------
@@ -487,6 +494,11 @@ export default function App() {
     void reorderProjects(reordered);
   };
 
+  const parsedNewPort = Number.parseInt(newPort, 10);
+  const addPortConflictNames = Number.isInteger(parsedNewPort)
+    ? projects.filter((project) => project.port === parsedNewPort).map((project) => project.name)
+    : [];
+
   const renderProjectsTab = () => (
     <section className="view projects-view">
       <header className="view-header" data-tauri-drag-region>
@@ -507,8 +519,27 @@ export default function App() {
         ) : (
           projects.map((project) => {
             const status = statusByProject[project.id];
-            const isRunning = !!status?.isRunning;
+            const runState = status?.runState ?? 'stopped';
+            const isRunning = runState === 'owned';
             const busy = !!busyByProject[project.id];
+            const ownerName =
+              status?.ownerProjectId
+                ? projects.find((item) => item.id === status.ownerProjectId)?.name ?? 'another project'
+                : null;
+            const runStateMessage =
+              runState === 'owned-by-other'
+                ? `Port active by ${ownerName ?? 'another project'}`
+                : runState === 'ambiguous'
+                  ? 'Port active (owner unclear)'
+                  : null;
+            const stopTitle =
+              runState === 'owned'
+                ? 'Stop project'
+                : runState === 'owned-by-other'
+                  ? 'Cannot stop: owned by another configured project'
+                  : runState === 'ambiguous'
+                    ? 'Cannot stop: owner unclear'
+                    : 'Project is not running';
 
             return (
               <article className="project-card" key={project.id}>
@@ -522,7 +553,7 @@ export default function App() {
                     <button
                       className="danger-pill"
                       type="button"
-                      title="Stop project"
+                      title={stopTitle}
                       disabled={!isRunning || busy}
                       onClick={() => void killProject(project.id)}
                     >
@@ -549,6 +580,7 @@ export default function App() {
                   <span className="meta-right">{relativeTime(status?.lastRunningAt ?? null)}</span>
                 </div>
 
+                {runStateMessage ? <p className="status-note">{runStateMessage}</p> : null}
                 {status?.error ? <p className="error-text">{status.error}</p> : null}
               </article>
             );
@@ -640,6 +672,9 @@ export default function App() {
                 <p className="detecting-text">No port detected, please enter manually.</p>
               ) : null}
               {detectedError ? <p className="detect-error">{detectedError}</p> : null}
+              {addPortConflictNames.length > 0 ? (
+                <p className="shared-port-warning">{sharedPortWarningText(addPortConflictNames)}</p>
+              ) : null}
             </div>
 
             <button className="primary-btn" type="submit" disabled={loading}>
@@ -666,6 +701,13 @@ export default function App() {
                   {projects.map((project) => {
                     const draft = projectDrafts[project.id];
                     const busy = !!busyByProject[project.id];
+                    const parsedDraftPort = draft ? Number.parseInt(draft.port, 10) : NaN;
+                    const draftPortConflictNames =
+                      draft && Number.isInteger(parsedDraftPort)
+                        ? projects
+                            .filter((candidate) => candidate.id !== project.id && candidate.port === parsedDraftPort)
+                            .map((candidate) => candidate.name)
+                        : [];
 
                     if (draft) {
                       return (
@@ -713,6 +755,12 @@ export default function App() {
                                 disabled={busy}
                               />
                             </label>
+
+                            {draftPortConflictNames.length > 0 ? (
+                              <p className="shared-port-warning">
+                                {sharedPortWarningText(draftPortConflictNames)}
+                              </p>
+                            ) : null}
 
                             <div className="inline-actions">
                               <button

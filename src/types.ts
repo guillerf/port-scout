@@ -54,6 +54,9 @@ export interface ProjectStatus {
   branch: string;
   isRunning: boolean;
   pid: number | null;
+  portActive: boolean;
+  runState: 'stopped' | 'owned' | 'owned-by-other' | 'ambiguous';
+  ownerProjectId: string | null;
   lastRunningAt: string | null;
   checkedAt: string;
   error: string | null;
@@ -64,6 +67,7 @@ export interface KillResult {
   attemptedPid: number | null;
   terminated: boolean;
   signalUsed: string;
+  blockedReason: 'not-running' | 'owned-by-other' | 'ambiguous' | null;
 }
 
 export interface Settings {
