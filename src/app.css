@@ -62,13 +62,13 @@
   --color-toast-success: #1b7c45;
   --color-toast-error: #8f2f3e;
 
-  --panel-shadow: 0 16px 28px rgba(0, 0, 0, 0.35);
+  --panel-shadow: none;
 
   /* Layout tokens */
   font-family: 'SF Pro Text', 'SF Pro Display', 'Segoe UI', sans-serif;
   color: var(--color-text);
   background: transparent;
-  --panel-radius: clamp(10px, 2.2vw, 16px);
+  --panel-radius: 20px;
   --title-size: clamp(20px, 5.2vw, 34px);
   --card-title-size: clamp(15px, 3.8vw, 24px);
 }
@@ -135,7 +135,7 @@
   --color-toast-success: #16a34a;
   --color-toast-error: #dc2626;
 
-  --panel-shadow: 0 16px 28px rgba(0, 0, 0, 0.12);
+  --panel-shadow: none;
 }
 
 /* System mode: when no data-theme is set, follow OS preference */
@@ -201,7 +201,7 @@
     --color-toast-success: #16a34a;
     --color-toast-error: #dc2626;
 
-    --panel-shadow: 0 16px 28px rgba(0, 0, 0, 0.12);
+    --panel-shadow: none;
   }
 }
 
@@ -218,6 +218,9 @@ body,
   height: 100%;
   margin: 0;
   background: transparent;
+  overflow: hidden;
+  overscroll-behavior: none;
+  border-radius: var(--panel-radius);
 }
 
 [data-tauri-drag-region] {
@@ -236,6 +239,8 @@ select {
   height: 100%;
   padding: 0;
   background: transparent;
+  border-radius: var(--panel-radius);
+  overflow: hidden;
 }
 
 .utility-panel {
@@ -245,7 +250,8 @@ select {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 0;
+  border: none;
+  outline: none;
   background: var(--color-bg-panel-gradient);
   box-shadow: var(--panel-shadow);
 }
@@ -262,6 +268,7 @@ select {
 .view {
   width: 100%;
   height: 100%;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto 1fr;
 }
@@ -271,7 +278,7 @@ select {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  padding: clamp(7px, 1.6vw, 11px) clamp(8px, 2vw, 12px) clamp(6px, 1.2vw, 8px);
+  padding: clamp(10px, 2.1vw, 14px) clamp(12px, 2.8vw, 16px) clamp(7px, 1.4vw, 9px);
   border-bottom: 1px solid var(--color-border);
   min-width: 0;
 }
@@ -327,8 +334,12 @@ select {
 /* ===== Scroll area ===== */
 
 .scroll-area {
+  height: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: clamp(6px, 1.2vw, 8px) clamp(6px, 1.4vw, 10px) clamp(8px, 1.6vw, 12px);
 }
 
@@ -391,6 +402,15 @@ select {
   flex-wrap: wrap;
   justify-content: flex-end;
   margin-left: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.project-card:hover .project-actions,
+.project-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* ===== Pills ===== */
@@ -435,7 +455,8 @@ select {
   display: flex;
   justify-content: space-between;
   gap: 6px 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   color: var(--color-text-secondary);
   font-size: clamp(10px, 1.8vw, 12px);
 }
@@ -876,13 +897,10 @@ select {
   .view-header h1 {
     letter-spacing: -0.015em;
   }
+}
 
-  .project-meta {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .meta-right {
-    margin-left: 0;
+@media (prefers-reduced-motion: reduce) {
+  .project-actions {
+    transition: none;
   }
 }
