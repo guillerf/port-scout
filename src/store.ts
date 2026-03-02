@@ -428,6 +428,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const result = await invoke<KillResult>('kill_project_port', { projectId });
       await get().refreshStatus();
 
+      const blockedMessage =
+        result.blockedReason === 'not-running'
+          ? 'Project is not running'
+          : result.blockedReason === 'owned-by-other'
+            ? 'Cannot stop: port is owned by another configured project'
+            : result.blockedReason === 'ambiguous'
+              ? 'Cannot stop: port owner is ambiguous'
+              : null;
+
       set((state) => {
         const nextBusy = { ...state.busyByProject };
         delete nextBusy[projectId];
@@ -436,10 +445,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
           busyByProject: nextBusy,
           toast: {
             id: ++toastId,
-            tone: 'success',
-            message: result.terminated
-              ? `Stopped PID ${result.attemptedPid ?? 'unknown'}`
-              : 'Port was already free',
+            tone: blockedMessage ? 'error' : 'success',
+            message: blockedMessage ?? (
+              result.terminated
+                ? `Stopped PID ${result.attemptedPid ?? 'unknown'}`
+                : 'Stop signal sent but process is still alive'
+            ),
           },
         };
       });

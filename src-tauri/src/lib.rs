@@ -61,9 +61,29 @@ struct ProjectStatus {
     branch: String,
     is_running: bool,
     pid: Option<i32>,
+    port_active: bool,
+    run_state: RunState,
+    owner_project_id: Option<String>,
     last_running_at: Option<String>,
     checked_at: String,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum RunState {
+    Stopped,
+    Owned,
+    OwnedByOther,
+    Ambiguous,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum KillBlockedReason {
+    NotRunning,
+    OwnedByOther,
+    Ambiguous,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,6 +93,7 @@ struct KillResult {
     attempted_pid: Option<i32>,
     terminated: bool,
     signal_used: String,
+    blocked_reason: Option<KillBlockedReason>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,6 +142,14 @@ struct AppState {
 
 struct UiState {
     auto_hide_suspended: Mutex<bool>,
+}
+
+#[derive(Debug, Clone)]
+struct PortRunInfo {
+    run_state: RunState,
+    owner_project_id: Option<String>,
+    owner_pid: Option<i32>,
+    port_active: bool,
 }
 
 #[tauri::command]
@@ -278,6 +307,22 @@ fn refresh_status(
     let mut changed_runtime = false;
     let checked_at = now_iso();
 
+    let mut projects_by_port: HashMap<u16, Vec<Project>> = HashMap::new();
+    for project in &projects {
+        projects_by_port
+            .entry(project.port)
+            .or_default()
+            .push(project.clone());
+    }
+
+    let mut run_info_by_project: HashMap<String, PortRunInfo> =
+        HashMap::with_capacity(projects.len());
+    for (port, projects_on_port) in projects_by_port {
+        let listening_pids = detect_listening_pids(port)?;
+        let states = resolve_port_run_info(&projects_on_port, &listening_pids)?;
+        run_info_by_project.extend(states);
+    }
+
     let mut statuses = Vec::with_capacity(projects.len());
     for project in projects {
         let path = Path::new(&project.path);
@@ -288,8 +333,17 @@ fn refresh_status(
             "not-a-git-repo".to_string()
         };
 
-        let pid = detect_listening_pid(project.port)?;
-        let is_running = pid.is_some();
+        let run_info = run_info_by_project
+            .get(&project.id)
+            .cloned()
+            .unwrap_or(PortRunInfo {
+                run_state: RunState::Stopped,
+                owner_project_id: None,
+                owner_pid: None,
+                port_active: false,
+            });
+        let is_running = run_info.run_state == RunState::Owned;
+        let pid = if is_running { run_info.owner_pid } else { None };
 
         if is_running {
             runtime
@@ -310,6 +364,9 @@ fn refresh_status(
             branch,
             is_running,
             pid,
+            port_active: run_info.port_active,
+            run_state: run_info.run_state,
+            owner_project_id: run_info.owner_project_id,
             last_running_at,
             checked_at: checked_at.clone(),
             error,
@@ -356,28 +413,53 @@ fn kill_project_port(state: State<'_, AppState>, project_id: String) -> Result<K
     let project = projects
         .iter()
         .find(|candidate| candidate.id == project_id)
+        .ok_or_else(|| "Project not found".to_string())?
+        .clone();
+    let projects_on_port: Vec<Project> = projects
+        .iter()
+        .filter(|candidate| candidate.port == project.port)
+        .cloned()
+        .collect();
+    drop(projects);
+
+    let listening_pids = detect_listening_pids(project.port)?;
+    let run_info_by_project = resolve_port_run_info(&projects_on_port, &listening_pids)?;
+    let run_info = run_info_by_project
+        .get(&project_id)
         .ok_or_else(|| "Project not found".to_string())?;
 
-    let pid = detect_listening_pid(project.port)?;
-    let Some(pid) = pid else {
+    let blocked_reason = blocked_reason_for_run_state(run_info.run_state);
+
+    if let Some(reason) = blocked_reason {
         return Ok(KillResult {
             project_id,
             attempted_pid: None,
             terminated: false,
             signal_used: "none".to_string(),
+            blocked_reason: Some(reason),
+        });
+    }
+
+    let Some(pid) = run_info.owner_pid else {
+        return Ok(KillResult {
+            project_id,
+            attempted_pid: None,
+            terminated: false,
+            signal_used: "none".to_string(),
+            blocked_reason: Some(KillBlockedReason::Ambiguous),
         });
     };
 
     send_signal(pid, "-TERM")?;
     let mut signal_used = "SIGTERM".to_string();
 
-    let terminated_after_term = wait_until_port_free(project.port, Duration::from_secs(2))?;
+    let terminated_after_term = wait_until_pid_dead(pid, Duration::from_secs(2))?;
     let terminated = if terminated_after_term {
         true
     } else {
         signal_used = "SIGKILL".to_string();
         send_signal(pid, "-KILL")?;
-        wait_until_port_free(project.port, Duration::from_secs(1))?
+        wait_until_pid_dead(pid, Duration::from_secs(1))?
     };
 
     Ok(KillResult {
@@ -385,6 +467,7 @@ fn kill_project_port(state: State<'_, AppState>, project_id: String) -> Result<K
         attempted_pid: Some(pid),
         terminated,
         signal_used,
+        blocked_reason: None,
     })
 }
 
@@ -493,13 +576,6 @@ fn validate_project_candidate(
     for project in projects {
         if ignore_project_id.is_some_and(|id| project.id == id) {
             continue;
-        }
-
-        if project.port == port {
-            return Err(format!(
-                "Port {} is already assigned to project '{}'",
-                port, project.name
-            ));
         }
 
         if project.path == normalized_path {
@@ -1119,13 +1195,22 @@ fn detect_branch(path: &Path) -> String {
     }
 }
 
-fn parse_first_pid(stdout: &str) -> Option<i32> {
-    stdout
-        .lines()
-        .find_map(|line| line.trim().parse::<i32>().ok())
+fn parse_pids(stdout: &str) -> Vec<i32> {
+    let mut pids = Vec::new();
+    let mut seen = HashSet::new();
+    for line in stdout.lines() {
+        let Ok(pid) = line.trim().parse::<i32>() else {
+            continue;
+        };
+        if seen.insert(pid) {
+            pids.push(pid);
+        }
+    }
+    pids.sort_unstable();
+    pids
 }
 
-fn detect_listening_pid(port: u16) -> Result<Option<i32>, String> {
+fn detect_listening_pids(port: u16) -> Result<Vec<i32>, String> {
     let output = Command::new("lsof")
         .arg("-nP")
         .arg(format!("-iTCP:{port}"))
@@ -1135,11 +1220,139 @@ fn detect_listening_pid(port: u16) -> Result<Option<i32>, String> {
         .map_err(|error| format!("Failed to check port status: {error}"))?;
 
     if output.stdout.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_pids(&stdout))
+}
+
+#[cfg(test)]
+fn detect_listening_pid(port: u16) -> Result<Option<i32>, String> {
+    Ok(detect_listening_pids(port)?.into_iter().next())
+}
+
+fn detect_pid_cwd(pid: i32) -> Result<Option<PathBuf>, String> {
+    let output = Command::new("lsof")
+        .arg("-a")
+        .arg("-p")
+        .arg(pid.to_string())
+        .arg("-d")
+        .arg("cwd")
+        .arg("-Fn")
+        .output()
+        .map_err(|error| format!("Failed to inspect PID {pid} cwd: {error}"))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
         return Ok(None);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_first_pid(&stdout))
+    for line in stdout.lines() {
+        let Some(raw_path) = line.strip_prefix('n') else {
+            continue;
+        };
+        if raw_path.is_empty() {
+            continue;
+        }
+
+        if let Ok(canonical) = fs::canonicalize(raw_path) {
+            return Ok(Some(canonical));
+        }
+    }
+
+    Ok(None)
+}
+
+fn project_matches_cwd(project_path: &str, cwd: &Path) -> bool {
+    cwd.starts_with(Path::new(project_path))
+}
+
+fn classify_port_run_info(
+    projects_on_port: &[Project],
+    port_active: bool,
+    matched_pids_by_project: HashMap<String, Vec<i32>>,
+) -> HashMap<String, PortRunInfo> {
+    let mut info_by_project = HashMap::with_capacity(projects_on_port.len());
+    for project in projects_on_port {
+        info_by_project.insert(
+            project.id.clone(),
+            PortRunInfo {
+                run_state: RunState::Stopped,
+                owner_project_id: None,
+                owner_pid: None,
+                port_active,
+            },
+        );
+    }
+
+    if !port_active {
+        return info_by_project;
+    }
+
+    if matched_pids_by_project.len() == 1 {
+        let (owner_project_id, owner_pids) = matched_pids_by_project
+            .into_iter()
+            .next()
+            .expect("single-entry map should have one element");
+        let owner_pid = owner_pids.into_iter().min();
+
+        for project in projects_on_port {
+            let Some(info) = info_by_project.get_mut(&project.id) else {
+                continue;
+            };
+            if project.id == owner_project_id {
+                info.run_state = RunState::Owned;
+                info.owner_project_id = Some(owner_project_id.clone());
+                info.owner_pid = owner_pid;
+            } else {
+                info.run_state = RunState::OwnedByOther;
+                info.owner_project_id = Some(owner_project_id.clone());
+            }
+        }
+    } else {
+        for info in info_by_project.values_mut() {
+            info.run_state = RunState::Ambiguous;
+        }
+    }
+
+    info_by_project
+}
+
+fn resolve_port_run_info(
+    projects_on_port: &[Project],
+    listening_pids: &[i32],
+) -> Result<HashMap<String, PortRunInfo>, String> {
+    let mut matched_pids_by_project: HashMap<String, Vec<i32>> = HashMap::new();
+    for pid in listening_pids {
+        let Some(cwd) = detect_pid_cwd(*pid)? else {
+            continue;
+        };
+
+        for project in projects_on_port {
+            if project_matches_cwd(&project.path, &cwd) {
+                matched_pids_by_project
+                    .entry(project.id.clone())
+                    .or_default()
+                    .push(*pid);
+            }
+        }
+    }
+
+    Ok(classify_port_run_info(
+        projects_on_port,
+        !listening_pids.is_empty(),
+        matched_pids_by_project,
+    ))
+}
+
+fn blocked_reason_for_run_state(run_state: RunState) -> Option<KillBlockedReason> {
+    match run_state {
+        RunState::Stopped => Some(KillBlockedReason::NotRunning),
+        RunState::OwnedByOther => Some(KillBlockedReason::OwnedByOther),
+        RunState::Ambiguous => Some(KillBlockedReason::Ambiguous),
+        RunState::Owned => None,
+    }
 }
 
 fn send_signal(pid: i32, signal: &str) -> Result<(), String> {
@@ -1166,6 +1379,7 @@ fn is_pid_alive(pid: i32) -> Result<bool, String> {
     Ok(status.success())
 }
 
+#[cfg(test)]
 fn wait_until_port_free(port: u16, timeout: Duration) -> Result<bool, String> {
     let start = Instant::now();
     while start.elapsed() < timeout {
@@ -1176,6 +1390,18 @@ fn wait_until_port_free(port: u16, timeout: Duration) -> Result<bool, String> {
     }
 
     Ok(detect_listening_pid(port)?.is_none())
+}
+
+fn wait_until_pid_dead(pid: i32, timeout: Duration) -> Result<bool, String> {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if !is_pid_alive(pid)? {
+            return Ok(true);
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    Ok(!is_pid_alive(pid)?)
 }
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1494,10 +1720,10 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn parses_first_pid() {
-        assert_eq!(parse_first_pid("123\n456\n"), Some(123));
-        assert_eq!(parse_first_pid("\n"), None);
-        assert_eq!(parse_first_pid("abc\n999\n"), Some(999));
+    fn parses_listening_pids() {
+        assert_eq!(parse_pids("456\n123\n456\n"), vec![123, 456]);
+        assert_eq!(parse_pids("\n"), Vec::<i32>::new());
+        assert_eq!(parse_pids("abc\n999\n"), vec![999]);
     }
 
     #[test]
@@ -1507,21 +1733,27 @@ mod tests {
 
     #[test]
     fn validates_project_input() {
-        let temp = TempDir::new().expect("tempdir");
-        let path = temp.path().to_string_lossy().to_string();
+        let temp_one = TempDir::new().expect("tempdir one");
+        let temp_two = TempDir::new().expect("tempdir two");
+        let first_path = temp_one.path().to_string_lossy().to_string();
+        let second_path = temp_two.path().to_string_lossy().to_string();
 
-        validate_project_candidate("api", &path, 3000, &[], None).expect("valid input should pass");
+        validate_project_candidate("api", &first_path, 3000, &[], None)
+            .expect("valid input should pass");
 
         let existing = vec![Project {
             id: "1".to_string(),
             name: "existing".to_string(),
-            path: normalize_path(&path).expect("normalize path"),
+            path: normalize_path(&first_path).expect("normalize path"),
             port: 3000,
             created_at: now_iso(),
         }];
 
-        let duplicate_port = validate_project_candidate("dup", &path, 3000, &existing, None);
-        assert!(duplicate_port.is_err());
+        let duplicate_port = validate_project_candidate("dup", &second_path, 3000, &existing, None);
+        assert!(duplicate_port.is_ok());
+
+        let duplicate_path = validate_project_candidate("dup", &first_path, 4000, &existing, None);
+        assert!(duplicate_path.is_err());
     }
 
     #[test]
@@ -1556,11 +1788,92 @@ mod tests {
 
         let duplicate_other_port =
             validate_project_candidate("renamed", &first_path, 4000, &projects, Some("project-a"));
-        assert!(duplicate_other_port.is_err());
+        assert!(duplicate_other_port.is_ok());
 
         let duplicate_other_path =
             validate_project_candidate("renamed", &second_path, 3000, &projects, Some("project-a"));
         assert!(duplicate_other_path.is_err());
+    }
+
+    #[test]
+    fn classifies_shared_port_owned_and_owned_by_other() {
+        let projects = vec![
+            test_project("project-a", "/tmp/workspace/project-a", 3000),
+            test_project("project-b", "/tmp/workspace/project-b", 3000),
+        ];
+
+        let mut matched = HashMap::new();
+        matched.insert("project-a".to_string(), vec![7001]);
+        let states = classify_port_run_info(&projects, true, matched);
+
+        assert_eq!(states["project-a"].run_state, RunState::Owned);
+        assert_eq!(
+            states["project-a"].owner_project_id.as_deref(),
+            Some("project-a")
+        );
+        assert_eq!(states["project-a"].owner_pid, Some(7001));
+        assert_eq!(states["project-b"].run_state, RunState::OwnedByOther);
+        assert_eq!(
+            states["project-b"].owner_project_id.as_deref(),
+            Some("project-a")
+        );
+    }
+
+    #[test]
+    fn classifies_single_project_as_owned() {
+        let projects = vec![test_project("project-a", "/tmp/workspace/project-a", 3000)];
+
+        let mut matched = HashMap::new();
+        matched.insert("project-a".to_string(), vec![7001]);
+        let states = classify_port_run_info(&projects, true, matched);
+
+        assert_eq!(states["project-a"].run_state, RunState::Owned);
+        assert_eq!(states["project-a"].owner_pid, Some(7001));
+    }
+
+    #[test]
+    fn classifies_shared_port_as_ambiguous_without_unique_owner() {
+        let projects = vec![
+            test_project("project-a", "/tmp/workspace/project-a", 3000),
+            test_project("project-b", "/tmp/workspace/project-b", 3000),
+        ];
+
+        let states = classify_port_run_info(&projects, true, HashMap::new());
+        assert_eq!(states["project-a"].run_state, RunState::Ambiguous);
+        assert_eq!(states["project-b"].run_state, RunState::Ambiguous);
+        assert!(states["project-a"].port_active);
+        assert!(states["project-b"].port_active);
+    }
+
+    #[test]
+    fn classifies_port_as_stopped_when_no_listener() {
+        let projects = vec![
+            test_project("project-a", "/tmp/workspace/project-a", 3000),
+            test_project("project-b", "/tmp/workspace/project-b", 3000),
+        ];
+
+        let states = classify_port_run_info(&projects, false, HashMap::new());
+        assert_eq!(states["project-a"].run_state, RunState::Stopped);
+        assert_eq!(states["project-b"].run_state, RunState::Stopped);
+        assert!(!states["project-a"].port_active);
+        assert!(!states["project-b"].port_active);
+    }
+
+    #[test]
+    fn maps_blocked_reason_from_run_state() {
+        assert_eq!(blocked_reason_for_run_state(RunState::Owned), None);
+        assert_eq!(
+            blocked_reason_for_run_state(RunState::Stopped),
+            Some(KillBlockedReason::NotRunning)
+        );
+        assert_eq!(
+            blocked_reason_for_run_state(RunState::OwnedByOther),
+            Some(KillBlockedReason::OwnedByOther)
+        );
+        assert_eq!(
+            blocked_reason_for_run_state(RunState::Ambiguous),
+            Some(KillBlockedReason::Ambiguous)
+        );
     }
 
     #[test]
@@ -1757,6 +2070,16 @@ mod tests {
         assert!(terminated);
 
         let _ = child.try_wait();
+    }
+
+    fn test_project(id: &str, path: &str, port: u16) -> Project {
+        Project {
+            id: id.to_string(),
+            name: id.to_string(),
+            path: path.to_string(),
+            port,
+            created_at: now_iso(),
+        }
     }
 
     fn run_git<const N: usize>(path: &Path, args: [&str; N]) {

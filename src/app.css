@@ -56,6 +56,7 @@
   --color-status-stopped: #7d8599;
   --color-error: #ff7d8d;
   --color-error-detect: #ff8798;
+  --color-warning: #f5b855;
   --color-drag-handle: #4a5168;
   --color-drag-handle-hover: #7a84a0;
 
@@ -129,6 +130,7 @@
   --color-status-stopped: #9ca3af;
   --color-error: #dc2626;
   --color-error-detect: #dc2626;
+  --color-warning: #b45309;
   --color-drag-handle: #9ca3af;
   --color-drag-handle-hover: #6b7280;
 
@@ -195,6 +197,7 @@
     --color-status-stopped: #9ca3af;
     --color-error: #dc2626;
     --color-error-detect: #dc2626;
+    --color-warning: #b45309;
     --color-drag-handle: #9ca3af;
     --color-drag-handle-hover: #6b7280;
 
@@ -490,6 +493,12 @@ select {
   color: var(--color-error);
 }
 
+.status-note {
+  margin: 5px 0 0;
+  font-size: 10px;
+  color: var(--color-warning);
+}
+
 /* ===== Settings ===== */
 
 .settings-scroll {
@@ -597,7 +606,8 @@ select {
 
 .detecting-text,
 .detected-title,
-.detect-error {
+.detect-error,
+.shared-port-warning {
   margin: 0;
   font-size: 10px;
   line-height: 1.3;
@@ -617,6 +627,10 @@ select {
 
 .detect-error {
   color: var(--color-error-detect);
+}
+
+.shared-port-warning {
+  color: var(--color-warning);
 }
 
 .candidate-list {
