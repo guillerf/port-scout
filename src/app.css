@@ -402,6 +402,15 @@ select {
   flex-wrap: wrap;
   justify-content: flex-end;
   margin-left: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.project-card:hover .project-actions,
+.project-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* ===== Pills ===== */
@@ -895,5 +904,11 @@ select {
 
   .meta-right {
     margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-actions {
+    transition: none;
   }
 }
