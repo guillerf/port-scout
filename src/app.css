@@ -278,7 +278,7 @@ select {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  padding: clamp(7px, 1.6vw, 11px) clamp(8px, 2vw, 12px) clamp(6px, 1.2vw, 8px);
+  padding: clamp(10px, 2.1vw, 14px) clamp(12px, 2.8vw, 16px) clamp(7px, 1.4vw, 9px);
   border-bottom: 1px solid var(--color-border);
   min-width: 0;
 }
