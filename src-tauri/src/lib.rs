@@ -315,7 +315,8 @@ fn refresh_status(
             .push(project.clone());
     }
 
-    let mut run_info_by_project: HashMap<String, PortRunInfo> = HashMap::with_capacity(projects.len());
+    let mut run_info_by_project: HashMap<String, PortRunInfo> =
+        HashMap::with_capacity(projects.len());
     for (port, projects_on_port) in projects_by_port {
         let listening_pids = detect_listening_pids(port)?;
         let states = resolve_port_run_info(&projects_on_port, &listening_pids)?;
@@ -1334,7 +1335,7 @@ fn resolve_port_run_info(
                     .entry(project.id.clone())
                     .or_default()
                     .push(*pid);
-                }
+            }
         }
     }
 
@@ -1806,10 +1807,16 @@ mod tests {
         let states = classify_port_run_info(&projects, true, matched);
 
         assert_eq!(states["project-a"].run_state, RunState::Owned);
-        assert_eq!(states["project-a"].owner_project_id.as_deref(), Some("project-a"));
+        assert_eq!(
+            states["project-a"].owner_project_id.as_deref(),
+            Some("project-a")
+        );
         assert_eq!(states["project-a"].owner_pid, Some(7001));
         assert_eq!(states["project-b"].run_state, RunState::OwnedByOther);
-        assert_eq!(states["project-b"].owner_project_id.as_deref(), Some("project-a"));
+        assert_eq!(
+            states["project-b"].owner_project_id.as_deref(),
+            Some("project-a")
+        );
     }
 
     #[test]
@@ -1854,10 +1861,7 @@ mod tests {
 
     #[test]
     fn maps_blocked_reason_from_run_state() {
-        assert_eq!(
-            blocked_reason_for_run_state(RunState::Owned),
-            None
-        );
+        assert_eq!(blocked_reason_for_run_state(RunState::Owned), None);
         assert_eq!(
             blocked_reason_for_run_state(RunState::Stopped),
             Some(KillBlockedReason::NotRunning)
