@@ -526,8 +526,9 @@ select {
 
 .toggle-row {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+  gap: 8px;
   font-size: 11px;
   color: var(--color-text-toggle);
   margin-bottom: 10px;
@@ -747,6 +748,16 @@ select {
   display: flex;
   align-items: center;
   gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.editable-card:hover .editable-card-actions,
+.editable-card:focus-within .editable-card-actions,
+.editable-card-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .confirm-actions {
