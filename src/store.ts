@@ -1,4 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
+import { confirm } from '@tauri-apps/plugin-dialog';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { check } from '@tauri-apps/plugin-updater';
 import { create } from 'zustand';
 import type {
@@ -88,6 +90,45 @@ const errorMessage = (error: unknown): string => {
     }
   }
   return 'Unexpected error';
+};
+
+const updaterErrorMessage = (error: unknown): string => {
+  const message = errorMessage(error);
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('permission') ||
+    lower.includes('not allowed') ||
+    lower.includes('forbidden') ||
+    lower.includes('denied')
+  ) {
+    return 'Updater permission denied. Ensure `updater:default` and `process:default` are granted.';
+  }
+
+  if (
+    lower.includes('signature') ||
+    lower.includes('verify') ||
+    lower.includes('verification') ||
+    lower.includes('minisign') ||
+    lower.includes('pubkey') ||
+    lower.includes('public key')
+  ) {
+    return 'Update signature verification failed. Check updater public key and signed artifacts.';
+  }
+
+  if (
+    lower.includes('network') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('404') ||
+    lower.includes('no such host') ||
+    lower.includes('connection')
+  ) {
+    return 'Update endpoint is unreachable. Verify updater URL and release assets.';
+  }
+
+  return message;
 };
 
 let toastId = 0;
@@ -504,12 +545,28 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
 
       await update.downloadAndInstall();
+      set({ checkingUpdates: false });
+
+      const shouldRelaunch = await confirm(
+        `Update ${update.version} installed. Restart Port Scout now to apply it?`,
+        {
+          title: 'Port Scout',
+          kind: 'info',
+          okLabel: 'Restart now',
+          cancelLabel: 'Later',
+        },
+      );
+
+      if (shouldRelaunch) {
+        await relaunch();
+        return;
+      }
+
       set({
-        checkingUpdates: false,
         toast: {
           id: ++toastId,
           tone: 'success',
-          message: `Update ${update.version} installed. Relaunching...`,
+          message: `Update ${update.version} installed. Restart Port Scout later to finish update.`,
         },
       });
     } catch (error) {
@@ -518,7 +575,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         toast: {
           id: ++toastId,
           tone: 'error',
-          message: errorMessage(error),
+          message: updaterErrorMessage(error),
         },
       });
     }

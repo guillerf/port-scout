@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Default capabilities for the menu bar monitor app",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "updater:default",
+    "process:default"
+  ]
 }

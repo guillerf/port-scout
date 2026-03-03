@@ -37,6 +37,13 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
+      - name: Frontend build
+        run: npm run build
+
+      - name: Rust tests
+        run: cargo test
+        working-directory: src-tauri
+
       - name: Import Apple certificate
         uses: apple-actions/import-codesign-certs@v3
         with:
@@ -50,7 +57,10 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Port Scout ${{ github.ref_name }}
-          releaseBody: Release ${{ github.ref_name }}
+          releaseBody: |
+            Release ${{ github.ref_name }}
+
+            See CHANGELOG.md for release notes.
           releaseDraft: false
           prerelease: false
           args: --target universal-apple-darwin

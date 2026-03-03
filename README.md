@@ -40,13 +40,6 @@ npm run tauri:build
 
 Artifacts are emitted under `src-tauri/target/release/bundle`.
 
-## Data Storage
-
-Project and runtime state are stored in:
-
-- `~/Library/Application Support/com.guillerf.portscout/projects.json`
-- `~/Library/Application Support/com.guillerf.portscout/runtime.json`
-
 ## Backend Command API
 
 - `list_projects() -> Project[]`
@@ -58,13 +51,6 @@ Project and runtime state are stored in:
 - `get_settings() -> Settings`
 - `set_autostart(enabled: bool) -> Settings`
 - `quit_app() -> void`
-
-## Updater Setup
-
-Before shipping auto-updates, replace placeholder updater values in `src-tauri/tauri.conf.json`:
-
-- `plugins.updater.pubkey`: your Tauri updater public key
-- `plugins.updater.endpoints`: your hosted update JSON URL(s)
 
 ## Testing
 
