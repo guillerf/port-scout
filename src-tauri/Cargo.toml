@@ -1,5 +1,5 @@
 [package]
-name = "server_ports"
+name = "port_scout"
 version = "0.1.0"
 description = "Menu bar utility for monitoring local dev servers by port"
 authors = ["guille"]
@@ -9,7 +9,7 @@ edition = "2021"
 rust-version = "1.77.2"
 
 [lib]
-name = "server_ports_lib"
+name = "port_scout_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -1,4 +1,4 @@
-# Server Ports
+# Port Scout
 
 Menu bar macOS utility built with Tauri + React to monitor local dev servers by configured port.
 
@@ -44,8 +44,8 @@ Artifacts are emitted under `src-tauri/target/release/bundle`.
 
 Project and runtime state are stored in:
 
-- `~/Library/Application Support/com.guille.serverports/projects.json`
-- `~/Library/Application Support/com.guille.serverports/runtime.json`
+- `~/Library/Application Support/com.guillerf.portscout/projects.json`
+- `~/Library/Application Support/com.guillerf.portscout/runtime.json`
 
 ## Backend Command API
 

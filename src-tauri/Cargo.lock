@@ -2584,6 +2584,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "port_scout"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-log",
+ "tauri-plugin-updater",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3427,24 +3445,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "server_ports"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "log",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-log",
- "tauri-plugin-updater",
- "tempfile",
- "uuid",
 ]
 
 [[package]]
