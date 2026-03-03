@@ -747,6 +747,16 @@ select {
   display: flex;
   align-items: center;
   gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.editable-card:hover .editable-card-actions,
+.editable-card:focus-within .editable-card-actions,
+.editable-card-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .confirm-actions {
