@@ -1,26 +1,16 @@
 # Port Scout
 
-Menu bar macOS utility built with Tauri + React to monitor local dev servers by configured port.
+Port Scout is a lightweight menu bar app for macOS that helps you keep track of all your local development servers in one place. Instead of remembering which project runs on which port, you can quickly see each project’s status, open it in your browser, and stop the processes without touching the terminal. It is designed to stay out of your way while giving you instant visibility into what is running and where.
 
 ## Features
 
-- Add projects with name, folder path, and port.
-- Auto-refresh status every 5 seconds.
-- Show git branch, running PID, and last seen running time.
-- Open `http://localhost:<port>` directly.
-- Kill the listener process on that port with `SIGTERM` then `SIGKILL` fallback.
-- Start-at-login toggle via macOS LaunchAgent (`tauri-plugin-autostart`).
-- Launch hidden when started by autostart (`--minimized`).
-- Tray controls: show window, refresh, quit.
-- Updater plugin wired with signed updater artifact generation.
-- In-app `Check Updates` action (download + install flow).
-
-## Prerequisites
-
-- macOS
-- Node.js 20+
-- Rust toolchain (`cargo`, `rustc`)
-- Xcode Command Line Tools (`xcode-select --install`)
+- Monitor all your local projects and ports from the menu bar.
+- See at a glance whether each project is running or stopped.
+- Open any project instantly in your browser (localhost:<port>).
+- View useful context like git branch, active process, and last running time.
+- Stop a running port safely from the app.
+- Keep your list organized with editable projects and quick refresh.
+- Optional start at login so Port Scout is always ready when you start coding.
 
 ## Development
 
@@ -38,18 +28,6 @@ npm run tauri:build
 ```
 
 Artifacts are emitted under `src-tauri/target/release/bundle`.
-
-## Backend Command API
-
-- `list_projects() -> Project[]`
-- `add_project(input: AddProjectInput) -> Project`
-- `remove_project(project_id: string) -> void`
-- `refresh_status() -> ProjectStatus[]`
-- `open_project_url(project_id: string) -> void`
-- `kill_project_port(project_id: string) -> KillResult`
-- `get_settings() -> Settings`
-- `set_autostart(enabled: bool) -> Settings`
-- `quit_app() -> void`
 
 ## Testing
 
