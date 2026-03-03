@@ -21,7 +21,6 @@ Menu bar macOS utility built with Tauri + React to monitor local dev servers by 
 - Node.js 20+
 - Rust toolchain (`cargo`, `rustc`)
 - Xcode Command Line Tools (`xcode-select --install`)
-- For public distribution: full Xcode + Apple Developer account (signing/notarization)
 
 ## Development
 
