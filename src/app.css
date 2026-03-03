@@ -526,8 +526,9 @@ select {
 
 .toggle-row {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+  gap: 8px;
   font-size: 11px;
   color: var(--color-text-toggle);
   margin-bottom: 10px;
