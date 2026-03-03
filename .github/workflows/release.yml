@@ -49,7 +49,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: Server Ports ${{ github.ref_name }}
+          releaseName: Port Scout ${{ github.ref_name }}
           releaseBody: Release ${{ github.ref_name }}
           releaseDraft: false
           prerelease: false

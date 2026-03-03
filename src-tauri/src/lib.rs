@@ -1600,7 +1600,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&refresh, &separator, &quit])?;
 
-    let mut tray_builder = TrayIconBuilder::with_id("server-ports-tray").menu(&menu);
+    let mut tray_builder = TrayIconBuilder::with_id("port-scout-tray").menu(&menu);
 
     if let Some(icon) = app.default_window_icon().cloned() {
         tray_builder = tray_builder.icon(icon).icon_as_template(true);
@@ -1993,7 +1993,7 @@ mod tests {
     #[test]
     fn detect_project_ports_rejects_invalid_path() {
         let path = Path::new("/tmp").join(format!(
-            "server_ports_missing_{}",
+            "port_scout_missing_{}",
             now_iso().replace(':', "_")
         ));
         let result = detect_project_ports_for_path(path.to_string_lossy().as_ref());
