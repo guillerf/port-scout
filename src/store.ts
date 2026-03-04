@@ -378,6 +378,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
           },
         };
       });
+
+      await get().refreshStatus();
     } catch (error) {
       set((state) => ({
         busyByProject: {

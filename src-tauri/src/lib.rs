@@ -26,6 +26,7 @@ const POPOVER_MIN_WIDTH: f64 = 300.0;
 const POPOVER_MIN_HEIGHT: f64 = 380.0;
 const POPOVER_SAFE_MARGIN: f64 = 24.0;
 const POPOVER_OFFSET_Y_LOGICAL: f64 = 8.0;
+const TRAY_ID: &str = "port-scout-tray";
 const TRAY_ICON: tauri::image::Image<'_> = tauri::include_image!("./icons/TrayIcon.png");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -378,7 +379,30 @@ fn refresh_status(
         save_runtime(&app, &runtime)?;
     }
 
+    sync_tray_active_count(&app, &statuses);
+
     Ok(statuses)
+}
+
+fn active_project_count(statuses: &[ProjectStatus]) -> usize {
+    statuses.iter().filter(|status| status.is_running).count()
+}
+
+fn tray_title_for_active_count(count: usize) -> Option<String> {
+    if count == 0 {
+        None
+    } else {
+        Some(count.to_string())
+    }
+}
+
+fn sync_tray_active_count(app: &AppHandle, statuses: &[ProjectStatus]) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+
+    let title = tray_title_for_active_count(active_project_count(statuses));
+    let _ = tray.set_title(title.as_deref());
 }
 
 #[tauri::command]
@@ -1601,7 +1625,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&refresh, &separator, &quit])?;
 
-    let tray_builder = TrayIconBuilder::with_id("port-scout-tray")
+    let tray_builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .icon(TRAY_ICON)
         .icon_as_template(true);
@@ -1878,6 +1902,29 @@ mod tests {
     }
 
     #[test]
+    fn counts_only_running_projects_as_active() {
+        let statuses = vec![
+            test_status("project-a", true, RunState::Owned),
+            test_status("project-b", false, RunState::OwnedByOther),
+            test_status("project-c", false, RunState::Ambiguous),
+            test_status("project-d", false, RunState::Stopped),
+        ];
+
+        assert_eq!(active_project_count(&statuses), 1);
+    }
+
+    #[test]
+    fn tray_title_is_hidden_when_no_active_projects() {
+        assert_eq!(tray_title_for_active_count(0), None);
+    }
+
+    #[test]
+    fn tray_title_is_number_when_active_projects_exist() {
+        assert_eq!(tray_title_for_active_count(1), Some("1".to_string()));
+        assert_eq!(tray_title_for_active_count(12), Some("12".to_string()));
+    }
+
+    #[test]
     fn extracts_port_from_env_lines() {
         assert_eq!(extract_port_from_env_line("PORT=3000"), Some(3000));
         assert_eq!(extract_port_from_env_line("PORT = '5173'"), Some(5173));
@@ -2080,6 +2127,25 @@ mod tests {
             path: path.to_string(),
             port,
             created_at: now_iso(),
+        }
+    }
+
+    fn test_status(project_id: &str, is_running: bool, run_state: RunState) -> ProjectStatus {
+        ProjectStatus {
+            project_id: project_id.to_string(),
+            branch: "main".to_string(),
+            is_running,
+            pid: if is_running { Some(1234) } else { None },
+            port_active: is_running,
+            run_state,
+            owner_project_id: if is_running {
+                Some(project_id.to_string())
+            } else {
+                None
+            },
+            last_running_at: None,
+            checked_at: now_iso(),
+            error: None,
         }
     }
 
