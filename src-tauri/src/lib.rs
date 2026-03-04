@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    env,
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -580,11 +581,12 @@ fn start_project_server(
         return Err("Start command cannot be empty".to_string());
     }
 
-    let child = Command::new("zsh")
+    let child = Command::new("/bin/zsh")
         .arg("-lc")
         .arg(&command)
         .current_dir(path)
         .env("PORT", project.port.to_string())
+        .env("PATH", launch_shell_path())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -666,6 +668,41 @@ fn now_iso() -> String {
 
 fn default_start_command() -> String {
     "npm run dev".to_string()
+}
+
+fn launch_shell_path() -> String {
+    let mut path_entries: Vec<String> = env::var("PATH")
+        .ok()
+        .into_iter()
+        .flat_map(|value| value.split(':').map(|entry| entry.to_string()).collect::<Vec<_>>())
+        .filter(|entry| !entry.trim().is_empty())
+        .collect();
+
+    // Finder-launched macOS apps often miss Homebrew/user bins.
+    let mut common_entries = vec![
+        "/opt/homebrew/bin".to_string(),
+        "/opt/homebrew/sbin".to_string(),
+        "/usr/local/bin".to_string(),
+        "/usr/local/sbin".to_string(),
+        "/usr/bin".to_string(),
+        "/bin".to_string(),
+        "/usr/sbin".to_string(),
+        "/sbin".to_string(),
+    ];
+
+    if let Ok(home) = env::var("HOME") {
+        common_entries.push(format!("{home}/.local/bin"));
+        common_entries.push(format!("{home}/.bun/bin"));
+        common_entries.push(format!("{home}/.cargo/bin"));
+    }
+
+    for entry in common_entries {
+        if !path_entries.iter().any(|existing| existing == &entry) {
+            path_entries.push(entry);
+        }
+    }
+
+    path_entries.join(":")
 }
 
 fn build_localhost_url(port: u16) -> String {
@@ -2158,6 +2195,15 @@ mod tests {
     #[test]
     fn default_start_command_is_npm_dev() {
         assert_eq!(default_start_command(), "npm run dev");
+    }
+
+    #[test]
+    fn launch_shell_path_includes_common_binary_dirs() {
+        let path = launch_shell_path();
+        assert!(path.split(':').any(|entry| entry == "/opt/homebrew/bin"));
+        assert!(path.split(':').any(|entry| entry == "/usr/local/bin"));
+        assert!(path.split(':').any(|entry| entry == "/usr/bin"));
+        assert!(path.split(':').any(|entry| entry == "/bin"));
     }
 
     #[test]
