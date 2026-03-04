@@ -26,6 +26,7 @@ const POPOVER_MIN_WIDTH: f64 = 300.0;
 const POPOVER_MIN_HEIGHT: f64 = 380.0;
 const POPOVER_SAFE_MARGIN: f64 = 24.0;
 const POPOVER_OFFSET_Y_LOGICAL: f64 = 8.0;
+const TRAY_ICON: tauri::image::Image<'_> = tauri::include_image!("./icons/TrayIcon.png");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1600,11 +1601,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&refresh, &separator, &quit])?;
 
-    let mut tray_builder = TrayIconBuilder::with_id("port-scout-tray").menu(&menu);
-
-    if let Some(icon) = app.default_window_icon().cloned() {
-        tray_builder = tray_builder.icon(icon).icon_as_template(true);
-    }
+    let tray_builder = TrayIconBuilder::with_id("port-scout-tray")
+        .menu(&menu)
+        .icon(TRAY_ICON)
+        .icon_as_template(true);
 
     tray_builder
         .show_menu_on_left_click(false)
