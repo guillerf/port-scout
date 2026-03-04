@@ -388,11 +388,11 @@ fn active_project_count(statuses: &[ProjectStatus]) -> usize {
     statuses.iter().filter(|status| status.is_running).count()
 }
 
-fn tray_title_for_active_count(count: usize) -> Option<String> {
+fn tray_title_for_active_count(count: usize) -> String {
     if count == 0 {
-        None
+        String::new()
     } else {
-        Some(count.to_string())
+        count.to_string()
     }
 }
 
@@ -402,7 +402,7 @@ fn sync_tray_active_count(app: &AppHandle, statuses: &[ProjectStatus]) {
     };
 
     let title = tray_title_for_active_count(active_project_count(statuses));
-    let _ = tray.set_title(title.as_deref());
+    let _ = tray.set_title(Some(title.as_str()));
 }
 
 #[tauri::command]
@@ -1915,13 +1915,13 @@ mod tests {
 
     #[test]
     fn tray_title_is_hidden_when_no_active_projects() {
-        assert_eq!(tray_title_for_active_count(0), None);
+        assert_eq!(tray_title_for_active_count(0), "");
     }
 
     #[test]
     fn tray_title_is_number_when_active_projects_exist() {
-        assert_eq!(tray_title_for_active_count(1), Some("1".to_string()));
-        assert_eq!(tray_title_for_active_count(12), Some("12".to_string()));
+        assert_eq!(tray_title_for_active_count(1), "1");
+        assert_eq!(tray_title_for_active_count(12), "12");
     }
 
     #[test]
