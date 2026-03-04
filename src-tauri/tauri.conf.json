@@ -50,9 +50,9 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCMUUzMTQ4OEMyNDg0RDkKUldUWmhDU01TREVlZS9YRnhxb2tmc2pub256VC94bXhSQ1FtNW1vd04zK21EYUFTRnJNWEJiQnYK",
       "endpoints": [
-        "https://example.com/port-scout/latest.json"
+        "https://github.com/guillerf/port-scout/releases/latest/download/latest.json"
       ]
     }
   }
