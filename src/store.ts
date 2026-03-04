@@ -495,21 +495,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
             : result.blockedReason === 'ambiguous'
               ? 'Cannot start: port owner is ambiguous'
               : null;
+      const launchErrorMessage = !result.launched ? 'Start command was not launched' : null;
 
       set((state) => {
         const nextBusy = { ...state.busyByProject };
         delete nextBusy[projectId];
+        const message = blockedMessage ?? launchErrorMessage;
+
+        if (!message) {
+          return { busyByProject: nextBusy };
+        }
 
         return {
           busyByProject: nextBusy,
           toast: {
             id: ++toastId,
-            tone: blockedMessage ? 'error' : 'success',
-            message: blockedMessage ?? (
-              result.launched
-                ? `Start command launched${result.spawnedPid ? ` (PID ${result.spawnedPid})` : ''}`
-                : 'Start command was not launched'
-            ),
+            tone: 'error',
+            message,
           },
         };
       });
@@ -552,17 +554,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set((state) => {
         const nextBusy = { ...state.busyByProject };
         delete nextBusy[projectId];
+        const message =
+          blockedMessage ??
+          (result.terminated ? null : 'Stop signal sent but process is still alive');
+
+        if (!message) {
+          return { busyByProject: nextBusy };
+        }
 
         return {
           busyByProject: nextBusy,
           toast: {
             id: ++toastId,
-            tone: blockedMessage ? 'error' : 'success',
-            message: blockedMessage ?? (
-              result.terminated
-                ? `Stopped PID ${result.attemptedPid ?? 'unknown'}`
-                : 'Stop signal sent but process is still alive'
-            ),
+            tone: 'error',
+            message,
           },
         };
       });
