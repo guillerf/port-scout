@@ -11,6 +11,7 @@ import type {
   ProjectDraft,
   ProjectStatus,
   Settings,
+  StartResult,
   ThemeMode,
   Toast,
   UpdateProjectInput,
@@ -63,6 +64,7 @@ interface AppStore {
   removeProject: (projectId: string) => Promise<void>;
   reorderProjects: (projectIds: string[]) => Promise<void>;
   openProject: (projectId: string) => Promise<void>;
+  startProject: (projectId: string) => Promise<StartResult | null>;
   killProject: (projectId: string) => Promise<KillResult | null>;
   setAutostart: (enabled: boolean) => Promise<void>;
   checkForUpdates: () => Promise<void>;
@@ -177,6 +179,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           name: project.name,
           path: project.path,
           port: String(project.port),
+          startCommand: project.startCommand,
         },
       },
     }));
@@ -227,11 +230,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
 
+    const trimmedStartCommand = draft.startCommand.trim();
+    if (!trimmedStartCommand) {
+      set({
+        toast: {
+          id: ++toastId,
+          tone: 'error',
+          message: 'Start command cannot be empty',
+        },
+      });
+      return;
+    }
+
     await get().updateProject({
       id: projectId,
       name: draft.name.trim(),
       path: draft.path.trim(),
       port: parsedPort,
+      startCommand: trimmedStartCommand,
     });
   },
 
@@ -459,6 +475,59 @@ export const useAppStore = create<AppStore>((set, get) => ({
           message: errorMessage(error),
         },
       }));
+    }
+  },
+
+  startProject: async (projectId) => {
+    set((state) => ({
+      busyByProject: { ...state.busyByProject, [projectId]: true },
+    }));
+
+    try {
+      const result = await invoke<StartResult>('start_project_server', { projectId });
+      await get().refreshStatus();
+
+      const blockedMessage =
+        result.blockedReason === 'already-running'
+          ? 'Project is already running'
+          : result.blockedReason === 'owned-by-other'
+            ? 'Cannot start: port is owned by another configured project'
+            : result.blockedReason === 'ambiguous'
+              ? 'Cannot start: port owner is ambiguous'
+              : null;
+
+      set((state) => {
+        const nextBusy = { ...state.busyByProject };
+        delete nextBusy[projectId];
+
+        return {
+          busyByProject: nextBusy,
+          toast: {
+            id: ++toastId,
+            tone: blockedMessage ? 'error' : 'success',
+            message: blockedMessage ?? (
+              result.launched
+                ? `Start command launched${result.spawnedPid ? ` (PID ${result.spawnedPid})` : ''}`
+                : 'Start command was not launched'
+            ),
+          },
+        };
+      });
+
+      return result;
+    } catch (error) {
+      set((state) => ({
+        busyByProject: {
+          ...state.busyByProject,
+          [projectId]: false,
+        },
+        toast: {
+          id: ++toastId,
+          tone: 'error',
+          message: errorMessage(error),
+        },
+      }));
+      return null;
     }
   },
 

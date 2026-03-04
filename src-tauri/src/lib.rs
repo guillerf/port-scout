@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::Mutex,
     thread,
     time::{Duration, Instant},
@@ -36,6 +36,8 @@ struct Project {
     name: String,
     path: String,
     port: u16,
+    #[serde(default = "default_start_command")]
+    start_command: String,
     created_at: String,
 }
 
@@ -45,6 +47,8 @@ struct AddProjectInput {
     name: String,
     path: String,
     port: u16,
+    #[serde(default = "default_start_command")]
+    start_command: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -54,6 +58,8 @@ struct UpdateProjectInput {
     name: String,
     path: String,
     port: u16,
+    #[serde(default = "default_start_command")]
+    start_command: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,6 +135,25 @@ struct PortDetectionResult {
     best_port: Option<u16>,
     candidates: Vec<PortCandidate>,
     errors: Vec<String>,
+    suggested_start_command: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum StartBlockedReason {
+    AlreadyRunning,
+    OwnedByOther,
+    Ambiguous,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartResult {
+    project_id: String,
+    attempted_command: String,
+    launched: bool,
+    spawned_pid: Option<i32>,
+    blocked_reason: Option<StartBlockedReason>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -174,14 +199,21 @@ fn add_project(
         .lock()
         .map_err(|_| "projects lock poisoned")?;
 
-    let validated =
-        validate_project_candidate(&input.name, &input.path, input.port, &projects, None)?;
+    let validated = validate_project_candidate(
+        &input.name,
+        &input.path,
+        input.port,
+        &input.start_command,
+        &projects,
+        None,
+    )?;
 
     let project = Project {
         id: uuid::Uuid::new_v4().to_string(),
         name: validated.name,
         path: validated.path,
         port: validated.port,
+        start_command: validated.start_command,
         created_at: now_iso(),
     };
 
@@ -211,6 +243,7 @@ fn update_project(
         &input.name,
         &input.path,
         input.port,
+        &input.start_command,
         &projects,
         Some(&input.id),
     )?;
@@ -218,6 +251,7 @@ fn update_project(
     projects[index].name = validated.name;
     projects[index].path = validated.path;
     projects[index].port = validated.port;
+    projects[index].start_command = validated.start_command;
 
     save_projects(&app, &projects)?;
 
@@ -497,6 +531,78 @@ fn kill_project_port(state: State<'_, AppState>, project_id: String) -> Result<K
 }
 
 #[tauri::command]
+fn start_project_server(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<StartResult, String> {
+    let projects = state
+        .projects
+        .lock()
+        .map_err(|_| "projects lock poisoned")?;
+    let project = projects
+        .iter()
+        .find(|candidate| candidate.id == project_id)
+        .ok_or_else(|| "Project not found".to_string())?
+        .clone();
+    let projects_on_port: Vec<Project> = projects
+        .iter()
+        .filter(|candidate| candidate.port == project.port)
+        .cloned()
+        .collect();
+    drop(projects);
+
+    let listening_pids = detect_listening_pids(project.port)?;
+    let run_info_by_project = resolve_port_run_info(&projects_on_port, &listening_pids)?;
+    let run_info = run_info_by_project
+        .get(&project_id)
+        .ok_or_else(|| "Project not found".to_string())?;
+
+    let attempted_command = project.start_command.clone();
+    let blocked_reason = start_blocked_reason_for_run_state(run_info.run_state);
+
+    if let Some(reason) = blocked_reason {
+        return Ok(StartResult {
+            project_id,
+            attempted_command,
+            launched: false,
+            spawned_pid: None,
+            blocked_reason: Some(reason),
+        });
+    }
+
+    let path = Path::new(&project.path);
+    if !path.is_dir() {
+        return Err("Project path is missing or no longer a directory".to_string());
+    }
+
+    let command = project.start_command.trim().to_string();
+    if command.is_empty() {
+        return Err("Start command cannot be empty".to_string());
+    }
+
+    let child = Command::new("zsh")
+        .arg("-lc")
+        .arg(&command)
+        .current_dir(path)
+        .env("PORT", project.port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Failed to start project server: {error}"))?;
+
+    let spawned_pid = i32::try_from(child.id()).ok();
+
+    Ok(StartResult {
+        project_id,
+        attempted_command,
+        launched: true,
+        spawned_pid,
+        blocked_reason: None,
+    })
+}
+
+#[tauri::command]
 fn get_settings(app: AppHandle) -> Result<Settings, String> {
     let enabled = app
         .autolaunch()
@@ -558,6 +664,10 @@ fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
+fn default_start_command() -> String {
+    "npm run dev".to_string()
+}
+
 fn build_localhost_url(port: u16) -> String {
     format!("http://localhost:{port}")
 }
@@ -574,12 +684,14 @@ struct ValidatedProjectInput {
     name: String,
     path: String,
     port: u16,
+    start_command: String,
 }
 
 fn validate_project_candidate(
     name: &str,
     path: &str,
     port: u16,
+    start_command: &str,
     projects: &[Project],
     ignore_project_id: Option<&str>,
 ) -> Result<ValidatedProjectInput, String> {
@@ -590,6 +702,11 @@ fn validate_project_candidate(
 
     if port == 0 {
         return Err("Port must be in the range 1..65535".to_string());
+    }
+
+    let trimmed_start_command = start_command.trim();
+    if trimmed_start_command.is_empty() {
+        return Err("Start command cannot be empty".to_string());
     }
 
     let normalized_path = normalize_path(path)?;
@@ -615,6 +732,7 @@ fn validate_project_candidate(
         name: trimmed_name.to_string(),
         path: normalized_path,
         port,
+        start_command: trimmed_start_command.to_string(),
     })
 }
 
@@ -632,6 +750,7 @@ fn detect_project_ports_for_path(path: &str) -> Result<PortDetectionResult, Stri
     candidates.extend(detect_from_esbuild_config_files(&base_path, &mut errors));
     candidates.extend(detect_from_vite_config_files(&base_path, &mut errors));
     candidates.extend(detect_from_docker_compose_files(&base_path, &mut errors));
+    let suggested_start_command = detect_project_start_command_for_path(&base_path);
 
     let ranked_candidates = rank_and_dedupe_candidates(candidates);
     let best_port = ranked_candidates.first().map(|candidate| candidate.port);
@@ -640,6 +759,7 @@ fn detect_project_ports_for_path(path: &str) -> Result<PortDetectionResult, Stri
         best_port,
         candidates: ranked_candidates,
         errors,
+        suggested_start_command,
     })
 }
 
@@ -746,6 +866,78 @@ fn detect_from_package_json(base_path: &Path, errors: &mut Vec<String>) -> Vec<P
     }
 
     candidates
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackageManager {
+    Npm,
+    Pnpm,
+    Yarn,
+    Bun,
+}
+
+fn detect_project_start_command_for_path(base_path: &Path) -> Option<String> {
+    let file_path = base_path.join("package.json");
+    if !file_path.exists() {
+        return None;
+    }
+
+    let contents = match fs::read_to_string(&file_path) {
+        Ok(contents) => contents,
+        Err(_) => return None,
+    };
+
+    let parsed = match serde_json::from_str::<serde_json::Value>(&contents) {
+        Ok(parsed) => parsed,
+        Err(_) => return None,
+    };
+
+    let scripts = parsed.get("scripts").and_then(|value| value.as_object())?;
+    let script_key = preferred_start_script_key(scripts)?;
+
+    let package_manager = detect_package_manager(base_path);
+    Some(command_for_package_manager(package_manager, script_key))
+}
+
+fn preferred_start_script_key(
+    scripts: &serde_json::Map<String, serde_json::Value>,
+) -> Option<&'static str> {
+    for key in ["dev", "start", "serve"] {
+        let is_valid = scripts
+            .get(key)
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| !value.trim().is_empty());
+        if is_valid {
+            return Some(key);
+        }
+    }
+
+    None
+}
+
+fn detect_package_manager(base_path: &Path) -> PackageManager {
+    if base_path.join("pnpm-lock.yaml").is_file() {
+        return PackageManager::Pnpm;
+    }
+
+    if base_path.join("yarn.lock").is_file() {
+        return PackageManager::Yarn;
+    }
+
+    if base_path.join("bun.lockb").is_file() || base_path.join("bun.lock").is_file() {
+        return PackageManager::Bun;
+    }
+
+    PackageManager::Npm
+}
+
+fn command_for_package_manager(package_manager: PackageManager, script_key: &str) -> String {
+    match package_manager {
+        PackageManager::Npm => format!("npm run {script_key}"),
+        PackageManager::Pnpm => format!("pnpm run {script_key}"),
+        PackageManager::Yarn => format!("yarn {script_key}"),
+        PackageManager::Bun => format!("bun run {script_key}"),
+    }
 }
 
 fn detect_ports_in_script(script: &str) -> Vec<u16> {
@@ -1380,6 +1572,15 @@ fn blocked_reason_for_run_state(run_state: RunState) -> Option<KillBlockedReason
     }
 }
 
+fn start_blocked_reason_for_run_state(run_state: RunState) -> Option<StartBlockedReason> {
+    match run_state {
+        RunState::Stopped => None,
+        RunState::Owned => Some(StartBlockedReason::AlreadyRunning),
+        RunState::OwnedByOther => Some(StartBlockedReason::OwnedByOther),
+        RunState::Ambiguous => Some(StartBlockedReason::Ambiguous),
+    }
+}
+
 fn send_signal(pid: i32, signal: &str) -> Result<(), String> {
     let status = Command::new("kill")
         .arg(signal)
@@ -1721,6 +1922,7 @@ pub fn run() {
             refresh_status,
             open_project_url,
             kill_project_port,
+            start_project_server,
             get_settings,
             set_autostart,
             detect_project_ports,
@@ -1763,7 +1965,7 @@ mod tests {
         let first_path = temp_one.path().to_string_lossy().to_string();
         let second_path = temp_two.path().to_string_lossy().to_string();
 
-        validate_project_candidate("api", &first_path, 3000, &[], None)
+        validate_project_candidate("api", &first_path, 3000, "npm run dev", &[], None)
             .expect("valid input should pass");
 
         let existing = vec![Project {
@@ -1771,13 +1973,28 @@ mod tests {
             name: "existing".to_string(),
             path: normalize_path(&first_path).expect("normalize path"),
             port: 3000,
+            start_command: default_start_command(),
             created_at: now_iso(),
         }];
 
-        let duplicate_port = validate_project_candidate("dup", &second_path, 3000, &existing, None);
+        let duplicate_port = validate_project_candidate(
+            "dup",
+            &second_path,
+            3000,
+            "pnpm run dev",
+            &existing,
+            None,
+        );
         assert!(duplicate_port.is_ok());
 
-        let duplicate_path = validate_project_candidate("dup", &first_path, 4000, &existing, None);
+        let duplicate_path = validate_project_candidate(
+            "dup",
+            &first_path,
+            4000,
+            "pnpm run dev",
+            &existing,
+            None,
+        );
         assert!(duplicate_path.is_err());
     }
 
@@ -1796,6 +2013,7 @@ mod tests {
                 name: "a".to_string(),
                 path: first_path.clone(),
                 port: 3000,
+                start_command: default_start_command(),
                 created_at: now_iso(),
             },
             Project {
@@ -1803,20 +2021,39 @@ mod tests {
                 name: "b".to_string(),
                 path: second_path.clone(),
                 port: 4000,
+                start_command: default_start_command(),
                 created_at: now_iso(),
             },
         ];
 
-        let valid_self_update =
-            validate_project_candidate("renamed", &first_path, 3000, &projects, Some("project-a"));
+        let valid_self_update = validate_project_candidate(
+            "renamed",
+            &first_path,
+            3000,
+            "bun run dev",
+            &projects,
+            Some("project-a"),
+        );
         assert!(valid_self_update.is_ok());
 
-        let duplicate_other_port =
-            validate_project_candidate("renamed", &first_path, 4000, &projects, Some("project-a"));
+        let duplicate_other_port = validate_project_candidate(
+            "renamed",
+            &first_path,
+            4000,
+            "bun run dev",
+            &projects,
+            Some("project-a"),
+        );
         assert!(duplicate_other_port.is_ok());
 
-        let duplicate_other_path =
-            validate_project_candidate("renamed", &second_path, 3000, &projects, Some("project-a"));
+        let duplicate_other_path = validate_project_candidate(
+            "renamed",
+            &second_path,
+            3000,
+            "bun run dev",
+            &projects,
+            Some("project-a"),
+        );
         assert!(duplicate_other_path.is_err());
     }
 
@@ -1899,6 +2136,85 @@ mod tests {
             blocked_reason_for_run_state(RunState::Ambiguous),
             Some(KillBlockedReason::Ambiguous)
         );
+    }
+
+    #[test]
+    fn maps_start_blocked_reason_from_run_state() {
+        assert_eq!(
+            start_blocked_reason_for_run_state(RunState::Owned),
+            Some(StartBlockedReason::AlreadyRunning)
+        );
+        assert_eq!(start_blocked_reason_for_run_state(RunState::Stopped), None);
+        assert_eq!(
+            start_blocked_reason_for_run_state(RunState::OwnedByOther),
+            Some(StartBlockedReason::OwnedByOther)
+        );
+        assert_eq!(
+            start_blocked_reason_for_run_state(RunState::Ambiguous),
+            Some(StartBlockedReason::Ambiguous)
+        );
+    }
+
+    #[test]
+    fn default_start_command_is_npm_dev() {
+        assert_eq!(default_start_command(), "npm run dev");
+    }
+
+    #[test]
+    fn rejects_empty_start_command() {
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().to_string_lossy().to_string();
+        let result = validate_project_candidate("api", &path, 3000, "   ", &[], None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn detects_start_command_with_package_manager_lockfiles() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"scripts":{"dev":"vite","start":"node server.js"}}"#,
+        )
+        .expect("write package json");
+
+        let npm_command = detect_project_start_command_for_path(temp.path());
+        assert_eq!(npm_command.as_deref(), Some("npm run dev"));
+
+        fs::write(temp.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'")
+            .expect("write pnpm lock");
+        let pnpm_command = detect_project_start_command_for_path(temp.path());
+        assert_eq!(pnpm_command.as_deref(), Some("pnpm run dev"));
+
+        fs::remove_file(temp.path().join("pnpm-lock.yaml")).expect("remove pnpm lock");
+        fs::write(temp.path().join("yarn.lock"), "__metadata:").expect("write yarn lock");
+        let yarn_command = detect_project_start_command_for_path(temp.path());
+        assert_eq!(yarn_command.as_deref(), Some("yarn dev"));
+
+        fs::remove_file(temp.path().join("yarn.lock")).expect("remove yarn lock");
+        fs::write(temp.path().join("bun.lockb"), "bun").expect("write bun lock");
+        let bun_command = detect_project_start_command_for_path(temp.path());
+        assert_eq!(bun_command.as_deref(), Some("bun run dev"));
+    }
+
+    #[test]
+    fn detects_start_command_prefers_start_when_dev_missing() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"scripts":{"start":"next start","serve":"serve -s dist"}}"#,
+        )
+        .expect("write package json");
+        let command = detect_project_start_command_for_path(temp.path());
+        assert_eq!(command.as_deref(), Some("npm run start"));
+    }
+
+    #[test]
+    fn detects_no_start_command_when_scripts_missing() {
+        let temp = TempDir::new().expect("tempdir");
+        fs::write(temp.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#)
+            .expect("write package json");
+        let command = detect_project_start_command_for_path(temp.path());
+        assert_eq!(command, None);
     }
 
     #[test]
@@ -2126,6 +2442,7 @@ mod tests {
             name: id.to_string(),
             path: path.to_string(),
             port,
+            start_command: default_start_command(),
             created_at: now_iso(),
         }
     }
