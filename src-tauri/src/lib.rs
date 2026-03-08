@@ -3,8 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Mutex,
@@ -674,7 +673,12 @@ fn launch_shell_path() -> String {
     let mut path_entries: Vec<String> = env::var("PATH")
         .ok()
         .into_iter()
-        .flat_map(|value| value.split(':').map(|entry| entry.to_string()).collect::<Vec<_>>())
+        .flat_map(|value| {
+            value
+                .split(':')
+                .map(|entry| entry.to_string())
+                .collect::<Vec<_>>()
+        })
         .filter(|entry| !entry.trim().is_empty())
         .collect();
 
@@ -2014,24 +2018,12 @@ mod tests {
             created_at: now_iso(),
         }];
 
-        let duplicate_port = validate_project_candidate(
-            "dup",
-            &second_path,
-            3000,
-            "pnpm run dev",
-            &existing,
-            None,
-        );
+        let duplicate_port =
+            validate_project_candidate("dup", &second_path, 3000, "pnpm run dev", &existing, None);
         assert!(duplicate_port.is_ok());
 
-        let duplicate_path = validate_project_candidate(
-            "dup",
-            &first_path,
-            4000,
-            "pnpm run dev",
-            &existing,
-            None,
-        );
+        let duplicate_path =
+            validate_project_candidate("dup", &first_path, 4000, "pnpm run dev", &existing, None);
         assert!(duplicate_path.is_err());
     }
 
@@ -2257,8 +2249,11 @@ mod tests {
     #[test]
     fn detects_no_start_command_when_scripts_missing() {
         let temp = TempDir::new().expect("tempdir");
-        fs::write(temp.path().join("package.json"), r#"{"scripts":{"test":"vitest"}}"#)
-            .expect("write package json");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"scripts":{"test":"vitest"}}"#,
+        )
+        .expect("write package json");
         let command = detect_project_start_command_for_path(temp.path());
         assert_eq!(command, None);
     }
