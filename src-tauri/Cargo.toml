@@ -1,6 +1,6 @@
 [package]
 name = "port_scout"
-version = "0.1.0"
+version = "0.1.1"
 description = "Menu bar utility for monitoring local dev servers by port"
 authors = ["guille"]
 license = "MIT"
