@@ -7,6 +7,7 @@ export interface Project {
   name: string;
   path: string;
   port: number;
+  startCommand: string;
   createdAt: string;
 }
 
@@ -14,6 +15,7 @@ export interface AddProjectInput {
   name: string;
   path: string;
   port: number;
+  startCommand: string;
 }
 
 export type PortSource =
@@ -34,6 +36,7 @@ export interface PortDetectionResult {
   bestPort: number | null;
   candidates: PortCandidate[];
   errors: string[];
+  suggestedStartCommand: string | null;
 }
 
 export interface UpdateProjectInput {
@@ -41,12 +44,14 @@ export interface UpdateProjectInput {
   name: string;
   path: string;
   port: number;
+  startCommand: string;
 }
 
 export interface ProjectDraft {
   name: string;
   path: string;
   port: string;
+  startCommand: string;
 }
 
 export interface ProjectStatus {
@@ -68,6 +73,14 @@ export interface KillResult {
   terminated: boolean;
   signalUsed: string;
   blockedReason: 'not-running' | 'owned-by-other' | 'ambiguous' | null;
+}
+
+export interface StartResult {
+  projectId: string;
+  attemptedCommand: string;
+  launched: boolean;
+  spawnedPid: number | null;
+  blockedReason: 'already-running' | 'owned-by-other' | 'ambiguous' | null;
 }
 
 export interface Settings {

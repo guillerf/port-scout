@@ -16,6 +16,7 @@ import {
   GitBranch,
   Monitor,
   Moon,
+  Play,
   RefreshCw,
   Settings as SettingsIcon,
   Square,
@@ -225,6 +226,7 @@ interface AddProjectDialogProps {
   name: string;
   path: string;
   port: string;
+  startCommand: string;
   detectingPort: boolean;
   detectedCandidates: PortCandidate[];
   detectedError: string | null;
@@ -235,6 +237,7 @@ interface AddProjectDialogProps {
   onNameChange: (value: string) => void;
   onPathChange: (value: string) => void;
   onPortChange: (value: string) => void;
+  onStartCommandChange: (value: string) => void;
   onCandidateSelect: (port: number) => void;
 }
 
@@ -244,6 +247,7 @@ function AddProjectDialog({
   name,
   path,
   port,
+  startCommand,
   detectingPort,
   detectedCandidates,
   detectedError,
@@ -254,6 +258,7 @@ function AddProjectDialog({
   onNameChange,
   onPathChange,
   onPortChange,
+  onStartCommandChange,
   onCandidateSelect,
 }: AddProjectDialogProps) {
   if (!open) {
@@ -332,6 +337,16 @@ function AddProjectDialog({
             />
           </label>
 
+          <label>
+            Start command
+            <input
+              value={startCommand}
+              onChange={(event) => onStartCommandChange(event.target.value)}
+              placeholder="npm run dev"
+              required
+            />
+          </label>
+
           <div className="port-detect-meta">
             {detectingPort ? <p className="detecting-text">Detecting port...</p> : null}
             {!detectingPort && detectedCandidates.length > 0 ? (
@@ -404,6 +419,7 @@ export default function App() {
     removeProject,
     reorderProjects,
     openProject,
+    startProject,
     killProject,
     setAutostart,
     setThemeMode,
@@ -417,14 +433,17 @@ export default function App() {
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState('');
   const [newPort, setNewPort] = useState('');
+  const [newStartCommand, setNewStartCommand] = useState('npm run dev');
   const [detectingPort, setDetectingPort] = useState(false);
   const [detectedCandidates, setDetectedCandidates] = useState<PortCandidate[]>([]);
   const [detectedError, setDetectedError] = useState<string | null>(null);
   const [manualPortEdited, setManualPortEdited] = useState(false);
+  const [manualStartCommandEdited, setManualStartCommandEdited] = useState(false);
   const [confirmRemoveProjectId, setConfirmRemoveProjectId] = useState<string | null>(null);
 
   const detectRequestRef = useRef(0);
   const manualPortEditedRef = useRef(false);
+  const manualStartCommandEditedRef = useRef(false);
   const skipNextDebouncedDetectRef = useRef(false);
 
   function resetAddProjectDialog() {
@@ -433,7 +452,9 @@ export default function App() {
     setNewName('');
     setNewPath('');
     setNewPort('');
+    setNewStartCommand('npm run dev');
     setManualPortEdited(false);
+    setManualStartCommandEdited(false);
     setDetectingPort(false);
     setDetectedCandidates([]);
     setDetectedError(null);
@@ -500,6 +521,10 @@ export default function App() {
   }, [manualPortEdited]);
 
   useEffect(() => {
+    manualStartCommandEditedRef.current = manualStartCommandEdited;
+  }, [manualStartCommandEdited]);
+
+  useEffect(() => {
     if (!toast) {
       return;
     }
@@ -520,6 +545,9 @@ export default function App() {
       setDetectingPort(false);
       setDetectedCandidates([]);
       setDetectedError(null);
+      if (!manualStartCommandEditedRef.current) {
+        setNewStartCommand('npm run dev');
+      }
       return;
     }
 
@@ -539,6 +567,9 @@ export default function App() {
       setDetectedError(result.errors.length > 0 ? result.errors[0] : null);
       if (!manualPortEditedRef.current && result.bestPort !== null) {
         setNewPort(String(result.bestPort));
+      }
+      if (!manualStartCommandEditedRef.current && result.suggestedStartCommand) {
+        setNewStartCommand(result.suggestedStartCommand);
       }
     } catch (error) {
       if (requestId !== detectRequestRef.current) {
@@ -587,6 +618,9 @@ export default function App() {
       setDetectingPort(false);
       setDetectedCandidates([]);
       setDetectedError(null);
+      if (!manualStartCommandEditedRef.current) {
+        setNewStartCommand('npm run dev');
+      }
       return;
     }
 
@@ -660,6 +694,7 @@ export default function App() {
       name: newName.trim(),
       path: newPath.trim(),
       port: parsedPort,
+      startCommand: newStartCommand.trim(),
     });
 
     const nextProjects = useAppStore.getState().projects;
@@ -734,26 +769,41 @@ export default function App() {
                     <h2>{project.name}</h2>
                   </div>
 
-                  {isRunning ? (
+                  {runState === 'owned' || runState === 'stopped' ? (
                     <div className="project-actions">
-                      <button
-                        className="danger-pill"
-                        type="button"
-                        title="Stop project"
-                        disabled={busy}
-                        onClick={() => void killProject(project.id)}
-                      >
-                        <Square size={12} fill="currentColor" />
-                      </button>
-                      <button
-                        className="neutral-pill"
-                        type="button"
-                        title="Open project"
-                        disabled={busy}
-                        onClick={() => void openProject(project.id)}
-                      >
-                        <ExternalLink size={12} />
-                      </button>
+                      {runState === 'owned' ? (
+                        <>
+                          <button
+                            className="danger-pill"
+                            type="button"
+                            title="Stop project"
+                            disabled={busy}
+                            onClick={() => void killProject(project.id)}
+                          >
+                            <Square size={12} fill="currentColor" />
+                          </button>
+                          <button
+                            className="neutral-pill"
+                            type="button"
+                            title="Open project"
+                            disabled={busy}
+                            onClick={() => void openProject(project.id)}
+                          >
+                            <ExternalLink size={12} />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="neutral-pill"
+                          type="button"
+                          title="Start localhost server"
+                          aria-label="Start localhost server"
+                          disabled={busy}
+                          onClick={() => void startProject(project.id)}
+                        >
+                          <Play size={12} fill="currentColor" />
+                        </button>
+                      )}
                     </div>
                   ) : null}
                 </div>
@@ -871,6 +921,18 @@ export default function App() {
                                   updateProjectDraft(project.id, { port: event.target.value })
                                 }
                                 inputMode="numeric"
+                                disabled={busy}
+                              />
+                            </label>
+
+                            <label>
+                              Start command
+                              <input
+                                value={draft.startCommand}
+                                onChange={(event) =>
+                                  updateProjectDraft(project.id, { startCommand: event.target.value })
+                                }
+                                placeholder="npm run dev"
                                 disabled={busy}
                               />
                             </label>
@@ -1040,6 +1102,7 @@ export default function App() {
         name={newName}
         path={newPath}
         port={newPort}
+        startCommand={newStartCommand}
         detectingPort={detectingPort}
         detectedCandidates={detectedCandidates}
         detectedError={detectedError}
@@ -1052,6 +1115,10 @@ export default function App() {
         onPortChange={(value) => {
           setManualPortEdited(true);
           setNewPort(value);
+        }}
+        onStartCommandChange={(value) => {
+          setManualStartCommandEdited(true);
+          setNewStartCommand(value);
         }}
         onCandidateSelect={(portNumber) => {
           setManualPortEdited(true);
