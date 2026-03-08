@@ -216,6 +216,168 @@ function SortableDraftCard({ id, children }: { id: string; children: ReactNode }
 }
 
 // ---------------------------------------------------------------------------
+// AddProjectDialog
+// ---------------------------------------------------------------------------
+
+interface AddProjectDialogProps {
+  open: boolean;
+  loading: boolean;
+  name: string;
+  path: string;
+  port: string;
+  detectingPort: boolean;
+  detectedCandidates: PortCandidate[];
+  detectedError: string | null;
+  addPortConflictNames: string[];
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  onBrowsePath: () => Promise<void>;
+  onNameChange: (value: string) => void;
+  onPathChange: (value: string) => void;
+  onPortChange: (value: string) => void;
+  onCandidateSelect: (port: number) => void;
+}
+
+function AddProjectDialog({
+  open,
+  loading,
+  name,
+  path,
+  port,
+  detectingPort,
+  detectedCandidates,
+  detectedError,
+  addPortConflictNames,
+  onClose,
+  onSubmit,
+  onBrowsePath,
+  onNameChange,
+  onPathChange,
+  onPortChange,
+  onCandidateSelect,
+}: AddProjectDialogProps) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="dialog-layer"
+      role="presentation"
+      onClick={() => {
+        if (!loading) {
+          onClose();
+        }
+      }}
+    >
+      <section
+        className="dialog-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-project-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="dialog-header">
+          <div className="dialog-header-copy">
+            <h2 id="add-project-title">Add project</h2>
+            <p>Track a local app and its port.</p>
+          </div>
+          <button
+            className="ghost-icon-btn"
+            type="button"
+            title="Close"
+            aria-label="Close add project dialog"
+            disabled={loading}
+            onClick={onClose}
+          >
+            <X size={14} />
+          </button>
+        </header>
+
+        <form className="settings-form dialog-form" onSubmit={onSubmit}>
+          <label>
+            Path
+            <div className="path-row">
+              <input
+                value={path}
+                onChange={(event) => onPathChange(event.target.value)}
+                placeholder="/Users/me/project"
+                required
+                autoFocus
+              />
+              <button type="button" disabled={loading} onClick={() => void onBrowsePath()}>
+                Browse
+              </button>
+            </div>
+          </label>
+
+          <label>
+            Name
+            <input
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              placeholder="api"
+              required
+            />
+          </label>
+
+          <label>
+            Port
+            <input
+              value={port}
+              onChange={(event) => onPortChange(event.target.value)}
+              inputMode="numeric"
+              placeholder="3000"
+              required
+            />
+          </label>
+
+          <div className="port-detect-meta">
+            {detectingPort ? <p className="detecting-text">Detecting port...</p> : null}
+            {!detectingPort && detectedCandidates.length > 0 ? (
+              <>
+                <p className="detected-title">
+                  Detected port: <strong>{detectedCandidates[0].port}</strong>
+                </p>
+                <div className="candidate-list">
+                  {detectedCandidates.map((candidate) => (
+                    <button
+                      key={`${candidate.source}-${candidate.port}-${candidate.detail}`}
+                      className="candidate-chip"
+                      type="button"
+                      onClick={() => onCandidateSelect(candidate.port)}
+                      title={candidate.detail}
+                    >
+                      {candidate.port} · {sourceLabel(candidate.source)}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            {!detectingPort && path.trim() && detectedCandidates.length === 0 && !detectedError ? (
+              <p className="detecting-text">No port detected, please enter manually.</p>
+            ) : null}
+            {detectedError ? <p className="detect-error">{detectedError}</p> : null}
+            {addPortConflictNames.length > 0 ? (
+              <p className="shared-port-warning">{sharedPortWarningText(addPortConflictNames)}</p>
+            ) : null}
+          </div>
+
+          <div className="dialog-actions">
+            <button className="secondary-btn" type="button" disabled={loading} onClick={onClose}>
+              Cancel
+            </button>
+            <button className="primary-btn" type="submit" disabled={loading}>
+              Add project
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
@@ -251,6 +413,7 @@ export default function App() {
     clearToast,
   } = useAppStore();
 
+  const [isAddProjectDialogOpen, setIsAddProjectDialogOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPath, setNewPath] = useState('');
   const [newPort, setNewPort] = useState('');
@@ -263,6 +426,27 @@ export default function App() {
   const detectRequestRef = useRef(0);
   const manualPortEditedRef = useRef(false);
   const skipNextDebouncedDetectRef = useRef(false);
+
+  function resetAddProjectDialog() {
+    detectRequestRef.current += 1;
+    skipNextDebouncedDetectRef.current = false;
+    setNewName('');
+    setNewPath('');
+    setNewPort('');
+    setManualPortEdited(false);
+    setDetectingPort(false);
+    setDetectedCandidates([]);
+    setDetectedError(null);
+  }
+
+  function closeAddProjectDialog() {
+    if (loading) {
+      return;
+    }
+
+    setIsAddProjectDialogOpen(false);
+    resetAddProjectDialog();
+  }
 
   // dnd-kit sensors
   const sensors = useSensors(
@@ -296,6 +480,11 @@ export default function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (isAddProjectDialogOpen) {
+          closeAddProjectDialog();
+          return;
+        }
+
         void hideMainWindow();
       }
     };
@@ -304,7 +493,7 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [hideMainWindow]);
+  }, [hideMainWindow, isAddProjectDialogOpen, loading]);
 
   useEffect(() => {
     manualPortEditedRef.current = manualPortEdited;
@@ -388,6 +577,10 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!isAddProjectDialogOpen) {
+      return;
+    }
+
     const trimmedPath = newPath.trim();
     if (!trimmedPath) {
       detectRequestRef.current += 1;
@@ -409,7 +602,7 @@ export default function App() {
     return () => {
       clearTimeout(timer);
     };
-  }, [newPath]);
+  }, [isAddProjectDialogOpen, newPath]);
 
   const handleBrowseNewPath = async () => {
     await setAutoHideSuspended(true);
@@ -461,19 +654,20 @@ export default function App() {
       return;
     }
 
+    const previousIds = new Set(useAppStore.getState().projects.map((project) => project.id));
+
     await addProject({
       name: newName.trim(),
       path: newPath.trim(),
       port: parsedPort,
     });
 
-    setNewName('');
-    setNewPath('');
-    setNewPort('');
-    setManualPortEdited(false);
-    setDetectingPort(false);
-    setDetectedCandidates([]);
-    setDetectedError(null);
+    const nextProjects = useAppStore.getState().projects;
+    const wasAdded = nextProjects.some((project) => !previousIds.has(project.id));
+    if (wasAdded) {
+      setIsAddProjectDialogOpen(false);
+      resetAddProjectDialog();
+    }
   };
 
   const handleConfirmRemoveProject = async (projectId: string) => {
@@ -595,89 +789,21 @@ export default function App() {
 
       <div className="scroll-area settings-scroll">
         <section className="settings-section">
-          <h2>Add project</h2>
-          <form className="settings-form" onSubmit={handleAddProject}>
-            <label>
-              Path
-              <div className="path-row">
-                <input
-                  value={newPath}
-                  onChange={(event) => setNewPath(event.target.value)}
-                  placeholder="/Users/me/project"
-                  required
-                />
-                <button type="button" onClick={() => void handleBrowseNewPath()}>
-                  Browse
-                </button>
-              </div>
-            </label>
-
-            <label>
-              Name
-              <input
-                value={newName}
-                onChange={(event) => setNewName(event.target.value)}
-                placeholder="api"
-                required
-              />
-            </label>
-
-            <label>
-              Port
-              <input
-                value={newPort}
-                onChange={(event) => {
-                  setManualPortEdited(true);
-                  setNewPort(event.target.value);
-                }}
-                inputMode="numeric"
-                placeholder="3000"
-                required
-              />
-            </label>
-
-            <div className="port-detect-meta">
-              {detectingPort ? <p className="detecting-text">Detecting port...</p> : null}
-              {!detectingPort && detectedCandidates.length > 0 ? (
-                <>
-                  <p className="detected-title">
-                    Detected port: <strong>{detectedCandidates[0].port}</strong>
-                  </p>
-                  <div className="candidate-list">
-                    {detectedCandidates.map((candidate) => (
-                      <button
-                        key={`${candidate.source}-${candidate.port}-${candidate.detail}`}
-                        className="candidate-chip"
-                        type="button"
-                        onClick={() => {
-                          setManualPortEdited(true);
-                          setNewPort(String(candidate.port));
-                        }}
-                        title={candidate.detail}
-                      >
-                        {candidate.port} · {sourceLabel(candidate.source)}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-              {!detectingPort && newPath.trim() && detectedCandidates.length === 0 && !detectedError ? (
-                <p className="detecting-text">No port detected, please enter manually.</p>
-              ) : null}
-              {detectedError ? <p className="detect-error">{detectedError}</p> : null}
-              {addPortConflictNames.length > 0 ? (
-                <p className="shared-port-warning">{sharedPortWarningText(addPortConflictNames)}</p>
-              ) : null}
+          <div className="settings-section-header">
+            <div className="settings-section-copy">
+              <h2>Projects</h2>
+              <p>Reorder, edit, and add tracked apps.</p>
             </div>
-
-            <button className="primary-btn" type="submit" disabled={loading}>
+            <button
+              className="section-action-btn"
+              type="button"
+              disabled={loading}
+              onClick={() => setIsAddProjectDialogOpen(true)}
+            >
               Add project
             </button>
-          </form>
-        </section>
+          </div>
 
-        <section className="settings-section">
-          <h2>Configured projects</h2>
           {projects.length === 0 ? (
             <p className="empty small">No projects configured.</p>
           ) : (
@@ -825,67 +951,113 @@ export default function App() {
           )}
         </section>
 
-        <section className="settings-section compact">
-          <h2>Application</h2>
-
-          <div className="settings-subsection">
-            <h3>Appearance</h3>
-            <div className="theme-toggle">
-              {([
-                { mode: 'light', icon: <Sun size={14} />, label: 'Light' },
-                { mode: 'dark',  icon: <Moon size={14} />, label: 'Dark'  },
-                { mode: 'system', icon: <Monitor size={14} />, label: 'System' },
-              ] as { mode: ThemeMode; icon: ReactNode; label: string }[]).map(({ mode, icon, label }) => (
-                <button
-                  key={mode}
-                  type="button"
-                  title={label}
-                  className={themeMode === mode ? 'active' : ''}
-                  onClick={() => setThemeMode(mode)}
-                >
-                  {icon}
-                </button>
-              ))}
+        <section className="settings-section">
+          <div className="settings-section-header">
+            <div className="settings-section-copy">
+              <h2>Application</h2>
+              <p>Appearance, startup, and update controls.</p>
             </div>
           </div>
 
-          <label className="toggle-row">
-            <span>Start at login</span>
-            <input
-              type="checkbox"
-              checked={settings?.autostartEnabled ?? false}
-              onChange={(event) => void setAutostart(event.target.checked)}
-            />
-          </label>
+          <div className="settings-group">
+            <div className="settings-row">
+              <div className="settings-row-copy">
+                <h3>Appearance</h3>
+                <p>Choose how Port Scout looks.</p>
+              </div>
+              <div className="theme-toggle">
+                {([
+                  { mode: 'light', icon: <Sun size={14} />, label: 'Light' },
+                  { mode: 'dark', icon: <Moon size={14} />, label: 'Dark' },
+                  { mode: 'system', icon: <Monitor size={14} />, label: 'System' },
+                ] as { mode: ThemeMode; icon: ReactNode; label: string }[]).map(({ mode, icon, label }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    title={label}
+                    className={themeMode === mode ? 'active' : ''}
+                    onClick={() => setThemeMode(mode)}
+                  >
+                    {icon}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          <button
-            className="action-btn"
-            type="button"
-            onClick={() => void checkForUpdates()}
-            disabled={checkingUpdates}
-          >
-            {checkingUpdates ? 'Checking updates...' : 'Check updates'}
-          </button>
+            <label className="settings-row settings-row-interactive">
+              <div className="settings-row-copy">
+                <h3>Start at login</h3>
+                <p>Launch Port Scout when you sign in.</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings?.autostartEnabled ?? false}
+                onChange={(event) => void setAutostart(event.target.checked)}
+              />
+            </label>
 
-          <button
-            className="action-btn action-btn-quit"
-            type="button"
-            onClick={() => void quitApp()}
-          >
-            Quit
-          </button>
+            <div className="settings-row settings-row-stack">
+              <div className="settings-row-copy">
+                <h3>Updates</h3>
+                <p>Check for a newer version manually.</p>
+              </div>
+              <button
+                className="action-btn"
+                type="button"
+                onClick={() => void checkForUpdates()}
+                disabled={checkingUpdates}
+              >
+                {checkingUpdates ? 'Checking updates...' : 'Check updates'}
+              </button>
+            </div>
+          </div>
+
+          <div className="settings-danger-zone">
+            <button
+              className="action-btn action-btn-quit"
+              type="button"
+              onClick={() => void quitApp()}
+            >
+              Quit
+            </button>
+          </div>
         </section>
       </div>
     </section>
   );
 
   return (
-    <main className="utility-shell">
+    <main className={`utility-shell${isAddProjectDialogOpen ? ' dialog-open' : ''}`}>
       <section className="utility-panel">
         <div className="content-panel">
           {activeTab === 'projects' ? renderProjectsTab() : renderSettingsTab()}
         </div>
       </section>
+
+      <AddProjectDialog
+        open={isAddProjectDialogOpen}
+        loading={loading}
+        name={newName}
+        path={newPath}
+        port={newPort}
+        detectingPort={detectingPort}
+        detectedCandidates={detectedCandidates}
+        detectedError={detectedError}
+        addPortConflictNames={addPortConflictNames}
+        onClose={closeAddProjectDialog}
+        onSubmit={handleAddProject}
+        onBrowsePath={handleBrowseNewPath}
+        onNameChange={setNewName}
+        onPathChange={setNewPath}
+        onPortChange={(value) => {
+          setManualPortEdited(true);
+          setNewPort(value);
+        }}
+        onCandidateSelect={(portNumber) => {
+          setManualPortEdited(true);
+          setNewPort(String(portNumber));
+        }}
+      />
 
       {toast ? <aside className={`toast toast-${toast.tone}`}>{toast.message}</aside> : null}
     </main>

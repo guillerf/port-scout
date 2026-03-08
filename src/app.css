@@ -62,6 +62,7 @@
 
   --color-toast-success: #1b7c45;
   --color-toast-error: #8f2f3e;
+  --color-bg-overlay: rgba(8, 11, 18, 0.62);
 
   --panel-shadow: none;
 
@@ -136,6 +137,7 @@
 
   --color-toast-success: #16a34a;
   --color-toast-error: #dc2626;
+  --color-bg-overlay: rgba(240, 243, 248, 0.72);
 
   --panel-shadow: none;
 }
@@ -203,6 +205,7 @@
 
     --color-toast-success: #16a34a;
     --color-toast-error: #dc2626;
+    --color-bg-overlay: rgba(240, 243, 248, 0.72);
 
     --panel-shadow: none;
   }
@@ -238,6 +241,7 @@ select {
 }
 
 .utility-shell {
+  position: relative;
   width: 100%;
   height: 100%;
   padding: 0;
@@ -504,38 +508,115 @@ select {
 .settings-scroll {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .settings-section {
   border: 1px solid var(--color-border-card);
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--color-bg-card);
-  padding: 9px;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
 }
 
-.settings-section.compact {
-  padding-bottom: 10px;
+.settings-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
 }
 
-.settings-section h2 {
-  margin: 0 0 10px;
-  font-size: clamp(13px, 2.1vw, 15px);
+.settings-section-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.settings-section-copy h2 {
+  margin: 0;
+  font-size: clamp(13px, 2.3vw, 16px);
   color: var(--color-text-section-heading);
 }
 
-.toggle-row {
+.settings-section-copy p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--color-text-secondary);
+}
+
+.section-action-btn {
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-btn);
+  background: var(--color-bg-btn);
+  color: var(--color-text-btn);
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-group {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.settings-row {
   display: flex;
-  justify-content: flex-start;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  background: var(--color-bg-editable-card);
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-row-interactive {
+  cursor: pointer;
+}
+
+.settings-row-stack {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.settings-row-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-row-copy h3 {
+  margin: 0;
   font-size: 11px;
-  color: var(--color-text-toggle);
-  margin-bottom: 10px;
+  font-weight: 700;
+  color: var(--color-text-heading);
+}
+
+.settings-row-copy p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--color-text-secondary);
+}
+
+.settings-row input[type="checkbox"] {
+  flex-shrink: 0;
+}
+
+.settings-danger-zone {
+  padding-top: 2px;
 }
 
 .action-btn {
-  height: 28px;
+  height: 30px;
   border-radius: 10px;
   border: 1px solid var(--color-border-btn-action);
   background: var(--color-bg-btn-action);
@@ -546,11 +627,7 @@ select {
   cursor: pointer;
   display: block;
   width: 100%;
-  margin-top: 8px;
-}
-
-.action-btn:first-of-type {
-  margin-top: 0;
+  margin: 0;
 }
 
 /* ===== Forms ===== */
@@ -595,6 +672,12 @@ select {
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
+}
+
+.path-row button:disabled,
+.section-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ===== Port detection ===== */
@@ -681,6 +764,75 @@ select {
 .secondary-btn {
   background: var(--color-bg-btn-secondary);
   color: var(--color-text-btn-secondary);
+}
+
+/* ===== Dialog ===== */
+
+.dialog-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px;
+  background: var(--color-bg-overlay);
+  backdrop-filter: blur(12px);
+}
+
+.dialog-panel {
+  width: 100%;
+  max-width: 296px;
+  max-height: 100%;
+  overflow-y: auto;
+  border: 1px solid var(--color-border-card);
+  border-radius: 16px;
+  background: var(--color-bg-card);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+  box-shadow: 0 20px 36px rgba(0, 0, 0, 0.22);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dialog-header-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.dialog-header-copy h2 {
+  margin: 0;
+  font-size: clamp(14px, 2.5vw, 17px);
+  color: var(--color-text-heading);
+}
+
+.dialog-header-copy p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--color-text-secondary);
+}
+
+.dialog-form {
+  gap: 8px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.dialog-actions .primary-btn,
+.dialog-actions .secondary-btn {
+  min-width: 88px;
 }
 
 /* ===== Editable list / cards ===== */
@@ -853,6 +1005,7 @@ select {
   left: 50%;
   bottom: 16px;
   transform: translateX(-50%);
+  z-index: 40;
   min-width: 160px;
   border-radius: 10px;
   padding: 7px 10px;
