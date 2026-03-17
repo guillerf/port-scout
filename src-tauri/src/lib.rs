@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
     time::{Duration, Instant},
@@ -28,6 +28,8 @@ const POPOVER_SAFE_MARGIN: f64 = 24.0;
 const POPOVER_OFFSET_Y_LOGICAL: f64 = 8.0;
 const TRAY_ID: &str = "port-scout-tray";
 const TRAY_ICON: tauri::image::Image<'_> = tauri::include_image!("./icons/TrayIcon.png");
+const START_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(3);
+const START_ACTIVATION_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -152,6 +154,7 @@ struct StartResult {
     project_id: String,
     attempted_command: String,
     launched: bool,
+    activated: bool,
     spawned_pid: Option<i32>,
     blocked_reason: Option<StartBlockedReason>,
 }
@@ -565,6 +568,7 @@ fn start_project_server(
             project_id,
             attempted_command,
             launched: false,
+            activated: false,
             spawned_pid: None,
             blocked_reason: Some(reason),
         });
@@ -580,7 +584,7 @@ fn start_project_server(
         return Err("Start command cannot be empty".to_string());
     }
 
-    let child = Command::new("/bin/zsh")
+    let mut child = Command::new("/bin/zsh")
         .arg("-lc")
         .arg(&command)
         .current_dir(path)
@@ -593,11 +597,20 @@ fn start_project_server(
         .map_err(|error| format!("Failed to start project server: {error}"))?;
 
     let spawned_pid = i32::try_from(child.id()).ok();
+    let activated = wait_for_project_activation(
+        &project_id,
+        project.port,
+        &projects_on_port,
+        &mut child,
+        START_ACTIVATION_TIMEOUT,
+        START_ACTIVATION_POLL_INTERVAL,
+    )?;
 
     Ok(StartResult {
         project_id,
         attempted_command,
         launched: true,
+        activated,
         spawned_pid,
         blocked_reason: None,
     })
@@ -1622,6 +1635,45 @@ fn start_blocked_reason_for_run_state(run_state: RunState) -> Option<StartBlocke
     }
 }
 
+fn wait_for_project_activation(
+    project_id: &str,
+    port: u16,
+    projects_on_port: &[Project],
+    child: &mut Child,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<bool, String> {
+    let start = Instant::now();
+
+    loop {
+        let listening_pids = detect_listening_pids(port)?;
+        let run_info_by_project = resolve_port_run_info(projects_on_port, &listening_pids)?;
+        let run_info = run_info_by_project
+            .get(project_id)
+            .ok_or_else(|| "Project not found".to_string())?;
+
+        match run_info.run_state {
+            RunState::Owned => return Ok(true),
+            RunState::OwnedByOther | RunState::Ambiguous => return Ok(false),
+            RunState::Stopped => {}
+        }
+
+        if start.elapsed() >= timeout {
+            return Ok(false);
+        }
+
+        if let Some(status) = child.try_wait().map_err(|error| {
+            format!("Failed to inspect started process for project {project_id}: {error}")
+        })? {
+            if !status.success() {
+                return Ok(false);
+            }
+        }
+
+        thread::sleep(poll_interval);
+    }
+}
+
 fn send_signal(pid: i32, signal: &str) -> Result<(), String> {
     let status = Command::new("kill")
         .arg(signal)
@@ -2432,28 +2484,32 @@ mod tests {
             return;
         }
 
-        let mut launched = None;
-        for _ in 0..3 {
-            let port = available_port();
-            let mut child = Command::new("python3")
-                .arg("-m")
-                .arg("http.server")
-                .arg(port.to_string())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .expect("spawn dummy server");
+        let Some(launched) = (|| {
+            for _ in 0..3 {
+                let port = available_port()?;
+                let mut child = Command::new("python3")
+                    .arg("-m")
+                    .arg("http.server")
+                    .arg(port.to_string())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .expect("spawn dummy server");
 
-            if wait_for_port(port, Duration::from_secs(10)) {
-                launched = Some((port, child));
-                break;
+                if wait_for_port(port, Duration::from_secs(10)) {
+                    return Some((port, child));
+                }
+
+                let _ = child.kill();
+                let _ = child.wait();
             }
 
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+            None
+        })() else {
+            return;
+        };
 
-        let (port, mut child) = launched.expect("dummy server should start listening");
+        let (port, mut child) = launched;
 
         let pid = detect_listening_pid(port)
             .expect("detect port")
@@ -2475,6 +2531,115 @@ mod tests {
         assert!(terminated);
 
         let _ = child.try_wait();
+    }
+
+    #[test]
+    fn waits_for_project_activation_when_server_binds_port() {
+        if Command::new("python3").arg("--version").output().is_err() {
+            return;
+        }
+
+        let temp = TempDir::new().expect("tempdir");
+        let Some(port) = available_port() else {
+            return;
+        };
+        let project = test_project("project-a", temp.path().to_string_lossy().as_ref(), port);
+        let projects_on_port = vec![project.clone()];
+        let mut child = Command::new("python3")
+            .arg("-m")
+            .arg("http.server")
+            .arg(port.to_string())
+            .current_dir(temp.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn dummy server");
+
+        let activated = wait_for_project_activation(
+            &project.id,
+            port,
+            &projects_on_port,
+            &mut child,
+            Duration::from_secs(5),
+            Duration::from_millis(100),
+        )
+        .expect("wait for activation");
+
+        assert!(activated);
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn wait_for_project_activation_times_out_without_listener() {
+        if Command::new("python3").arg("--version").output().is_err() {
+            return;
+        }
+
+        let temp = TempDir::new().expect("tempdir");
+        let Some(port) = available_port() else {
+            return;
+        };
+        let project = test_project("project-a", temp.path().to_string_lossy().as_ref(), port);
+        let projects_on_port = vec![project.clone()];
+        let mut child = Command::new("python3")
+            .arg("-c")
+            .arg("import time; time.sleep(2)")
+            .current_dir(temp.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sleeper");
+
+        let activated = wait_for_project_activation(
+            &project.id,
+            port,
+            &projects_on_port,
+            &mut child,
+            Duration::from_millis(250),
+            Duration::from_millis(50),
+        )
+        .expect("wait for timeout");
+
+        assert!(!activated);
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn wait_for_project_activation_returns_false_when_process_exits_early() {
+        if Command::new("python3").arg("--version").output().is_err() {
+            return;
+        }
+
+        let temp = TempDir::new().expect("tempdir");
+        let Some(port) = available_port() else {
+            return;
+        };
+        let project = test_project("project-a", temp.path().to_string_lossy().as_ref(), port);
+        let projects_on_port = vec![project.clone()];
+        let mut child = Command::new("python3")
+            .arg("-c")
+            .arg("import sys; sys.exit(1)")
+            .current_dir(temp.path())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn exiting process");
+
+        let activated = wait_for_project_activation(
+            &project.id,
+            port,
+            &projects_on_port,
+            &mut child,
+            Duration::from_secs(1),
+            Duration::from_millis(50),
+        )
+        .expect("wait for early exit");
+
+        assert!(!activated);
     }
 
     fn test_project(id: &str, path: &str, port: u16) -> Project {
@@ -2517,9 +2682,9 @@ mod tests {
         assert!(status.success());
     }
 
-    fn available_port() -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind random port");
-        listener.local_addr().expect("local addr").port()
+    fn available_port() -> Option<u16> {
+        let listener = TcpListener::bind("127.0.0.1:0").ok()?;
+        listener.local_addr().ok().map(|addr| addr.port())
     }
 
     fn wait_for_port(port: u16, timeout: Duration) -> bool {
