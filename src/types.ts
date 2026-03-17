@@ -79,6 +79,7 @@ export interface StartResult {
   projectId: string;
   attemptedCommand: string;
   launched: boolean;
+  activated: boolean;
   spawnedPid: number | null;
   blockedReason: 'already-running' | 'owned-by-other' | 'ambiguous' | null;
 }
