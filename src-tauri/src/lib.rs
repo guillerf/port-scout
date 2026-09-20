@@ -2610,7 +2610,7 @@ mod tests {
     use super::*;
     use std::{
         net::TcpListener,
-        process::{Command, Stdio},
+        process::{Child, Command, Stdio},
         thread,
     };
     use tempfile::TempDir;
@@ -3581,53 +3581,79 @@ mod tests {
 
     #[test]
     fn detects_and_kills_dummy_server() {
-        if Command::new("python3").arg("--version").output().is_err() {
-            return;
+        const READY_FILE_ENV: &str = "PORT_SCOUT_TEST_LISTENER_READY_FILE";
+        const BIND_ADDRESS_ENV: &str = "PORT_SCOUT_TEST_LISTENER_BIND_ADDRESS";
+
+        // Run the listener in a child copy of this test, so the fixture needs
+        // no Python installation and keeps its OS-assigned port bound throughout.
+        if let Some(ready_file) = env::var_os(READY_FILE_ENV) {
+            let address = env::var(BIND_ADDRESS_ENV).expect("fixture bind address");
+            let listener = TcpListener::bind(address).expect("bind fixture listener");
+            let port = listener.local_addr().expect("fixture address").port();
+            fs::write(ready_file, port.to_string()).expect("announce fixture port");
+            loop {
+                thread::park();
+            }
         }
 
-        let mut launched = None;
-        for _ in 0..3 {
-            let port = available_port();
-            let mut child = Command::new("python3")
-                .arg("-m")
-                .arg("http.server")
-                .arg(port.to_string())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .expect("spawn dummy server");
+        for address in ["127.0.0.1:0", "[::1]:0"] {
+            let temp = TempDir::new().expect("fixture tempdir");
+            let ready_file = temp.path().join("listener-port");
+            let mut child = TestChild(
+                Command::new(env::current_exe().expect("test executable"))
+                    .args([
+                        "--exact",
+                        "tests::detects_and_kills_dummy_server",
+                        "--nocapture",
+                    ])
+                    .env(READY_FILE_ENV, &ready_file)
+                    .env(BIND_ADDRESS_ENV, address)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                    .expect("spawn fixture listener"),
+            );
 
-            if wait_for_port(port, Duration::from_secs(10)) {
-                launched = Some((port, child));
-                break;
-            }
+            let started = Instant::now();
+            let port = loop {
+                if let Some(status) = child.0.try_wait().expect("fixture process status") {
+                    panic!("fixture listener on {address} exited before readiness: {status}");
+                }
+                if let Some(port) = fs::read_to_string(&ready_file)
+                    .ok()
+                    .and_then(|value| value.parse::<u16>().ok())
+                {
+                    break port;
+                }
+                assert!(
+                    started.elapsed() < Duration::from_secs(10),
+                    "fixture listener on {address} did not report its port"
+                );
+                thread::sleep(Duration::from_millis(20));
+            };
 
-            let _ = child.kill();
-            let _ = child.wait();
+            let pid = detect_listening_pid(port)
+                .expect("detect fixture port")
+                .expect("fixture PID should be present");
+            assert_eq!(pid, child.0.id() as i32, "detected PID must be our fixture");
+
+            assert!(is_pid_alive(pid).expect("pid check"));
+
+            let terminated = {
+                send_signal(pid, "-TERM").expect("term signal");
+                let after_term =
+                    wait_until_port_free(port, Duration::from_secs(2)).expect("wait term");
+                if after_term {
+                    true
+                } else {
+                    send_signal(pid, "-KILL").expect("kill signal");
+                    wait_until_port_free(port, Duration::from_secs(1)).expect("wait kill")
+                }
+            };
+
+            assert!(terminated, "fixture port must be free after stopping {pid}");
         }
-
-        let (port, mut child) = launched.expect("dummy server should start listening");
-
-        let pid = detect_listening_pid(port)
-            .expect("detect port")
-            .expect("pid should be present");
-
-        assert!(is_pid_alive(pid).expect("pid check"));
-
-        let terminated = {
-            send_signal(pid, "-TERM").expect("term signal");
-            let after_term = wait_until_port_free(port, Duration::from_secs(2)).expect("wait term");
-            if after_term {
-                true
-            } else {
-                send_signal(pid, "-KILL").expect("kill signal");
-                wait_until_port_free(port, Duration::from_secs(1)).expect("wait kill")
-            }
-        };
-
-        assert!(terminated);
-
-        let _ = child.try_wait();
     }
 
     fn test_project(id: &str, path: &str, port: u16) -> Project {
@@ -3670,20 +3696,13 @@ mod tests {
         assert!(status.success());
     }
 
-    fn available_port() -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind random port");
-        listener.local_addr().expect("local addr").port()
-    }
+    struct TestChild(Child);
 
-    fn wait_for_port(port: u16, timeout: Duration) -> bool {
-        let start = Instant::now();
-        while start.elapsed() < timeout {
-            if detect_listening_pid(port).ok().flatten().is_some() {
-                return true;
-            }
-            thread::sleep(Duration::from_millis(100));
+    impl Drop for TestChild {
+        fn drop(&mut self) {
+            // Also clean up when a detection or signal assertion panics.
+            let _ = self.0.kill();
+            let _ = self.0.wait();
         }
-
-        false
     }
 }
