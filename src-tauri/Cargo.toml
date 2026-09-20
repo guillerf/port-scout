@@ -1,6 +1,6 @@
 [package]
 name = "port_scout"
-version = "0.1.1"
+version = "0.2.0"
 description = "Menu bar utility for monitoring local dev servers by port"
 authors = ["guille"]
 license = "MIT"
@@ -30,3 +30,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+# Backport tray-icon#365 until Tauri accepts the fixed tray-icon release.
+[patch.crates-io]
+tray-icon = { path = "vendor/tray-icon" }

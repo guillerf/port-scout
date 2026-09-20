@@ -38,6 +38,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { useAppStore } from './store';
 import type {
+  DiscoveredListener,
   PortCandidate,
   PortDetectionResult,
   PortSource,
@@ -370,7 +371,9 @@ function AddProjectDialog({
               </>
             ) : null}
             {!detectingPort && path.trim() && detectedCandidates.length === 0 && !detectedError ? (
-              <p className="detecting-text">No port detected, please enter manually.</p>
+              <p className="detecting-text">
+                {port.trim() ? 'No configured port found. Review the port above.' : 'No port detected, please enter manually.'}
+              </p>
             ) : null}
             {detectedError ? <p className="detect-error">{detectedError}</p> : null}
             {addPortConflictNames.length > 0 ? (
@@ -402,8 +405,21 @@ export default function App() {
     projects,
     projectDrafts,
     statusByProject,
+    discoveredListeners,
+    discoveryWarnings,
+    discoveryError,
+    discoveryCheckedAt,
+    discoverySettings,
+    discoverySettingsError,
+    discoverySettingsLoading,
+    discoveryFoldersBusy,
+    pendingDiscoveryFolders,
+    projectsError,
+    statusError,
+    settingsError,
     settings,
     loading,
+    refreshing,
     checkingUpdates,
     busyByProject,
     themeMode,
@@ -415,6 +431,8 @@ export default function App() {
     saveProjectDraft,
     hydrate,
     refreshStatus,
+    loadDiscoverySettings,
+    setDiscoveryFolders,
     addProject,
     removeProject,
     reorderProjects,
@@ -440,6 +458,8 @@ export default function App() {
   const [manualPortEdited, setManualPortEdited] = useState(false);
   const [manualStartCommandEdited, setManualStartCommandEdited] = useState(false);
   const [confirmRemoveProjectId, setConfirmRemoveProjectId] = useState<string | null>(null);
+  const [choosingDiscoveryFolder, setChoosingDiscoveryFolder] = useState(false);
+  const [folderPickerError, setFolderPickerError] = useState<string | null>(null);
 
   const detectRequestRef = useRef(0);
   const manualPortEditedRef = useRef(false);
@@ -469,6 +489,36 @@ export default function App() {
     resetAddProjectDialog();
   }
 
+  function trackListener(listener: DiscoveredListener) {
+    if (!listener.path) {
+      return;
+    }
+
+    const existingProject = projects.find((project) => (
+      project.path.replace(/\/+$/, '') === listener.path?.replace(/\/+$/, '')
+    ));
+    if (existingProject) {
+      if (!projectDrafts[existingProject.id]) {
+        beginProjectDraft(existingProject.id);
+      }
+      updateProjectDraft(existingProject.id, { port: String(listener.port) });
+      setActiveTab('settings');
+      return;
+    }
+
+    resetAddProjectDialog();
+    setNewName(listener.name);
+    setNewPath(listener.path);
+    setNewPort(String(listener.port));
+    setNewStartCommand(listener.suggestedStartCommand ?? '');
+    // The live port is more reliable than a default found in configuration.
+    manualPortEditedRef.current = true;
+    manualStartCommandEditedRef.current = !!listener.suggestedStartCommand;
+    setManualPortEdited(true);
+    setManualStartCommandEdited(!!listener.suggestedStartCommand);
+    setIsAddProjectDialogOpen(true);
+  }
+
   // dnd-kit sensors
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -482,14 +532,22 @@ export default function App() {
       void refreshStatus();
     }, REFRESH_MS);
 
+    let disposed = false;
     let unlisten: (() => void) | undefined;
     void listen('refresh-requested', () => {
       void refreshStatus();
     }).then((dispose) => {
-      unlisten = dispose;
+      if (disposed) {
+        dispose();
+      } else {
+        unlisten = dispose;
+      }
+    }).catch(() => {
+      // Polling continues if native event subscription is unavailable.
     });
 
     return () => {
+      disposed = true;
       clearInterval(timer);
       if (unlisten) {
         unlisten();
@@ -680,6 +738,36 @@ export default function App() {
     }
   };
 
+  const handleAddDiscoveryFolder = async () => {
+    if (choosingDiscoveryFolder || discoveryFoldersBusy || discoverySettingsLoading) return;
+    setChoosingDiscoveryFolder(true);
+    setFolderPickerError(null);
+    await setAutoHideSuspended(true);
+    try {
+      const selection = await open({ directory: true, multiple: false, title: 'Choose a discovery folder' });
+      const selectedPath = resolveDialogSelection(selection);
+      if (selectedPath) {
+        const folders = useAppStore.getState().discoverySettings?.folders ?? [];
+        if (!folders.includes(selectedPath)) {
+          await setDiscoveryFolders([...folders, selectedPath]);
+        }
+      }
+    } catch (error) {
+      setFolderPickerError(error instanceof Error ? error.message : String(error));
+    } finally {
+      await setAutoHideSuspended(false);
+      setChoosingDiscoveryFolder(false);
+    }
+  };
+
+  const retryDiscoverySettings = () => {
+    if (pendingDiscoveryFolders !== null) {
+      void setDiscoveryFolders(pendingDiscoveryFolders);
+    } else {
+      void loadDiscoverySettings();
+    }
+  };
+
   const handleAddProject = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -728,12 +816,28 @@ export default function App() {
     ? projects.filter((project) => project.port === parsedNewPort).map((project) => project.name)
     : [];
 
+  // Only hide ownership confirmed by the backend. A matching path/port without
+  // projectId may still represent ambiguous ownership and must stay visible.
+  const hasDiscoveryFolders = !!discoverySettings?.folders.length;
+  const discoverySettingsBusy = discoveryFoldersBusy || discoverySettingsLoading || choosingDiscoveryFolder;
+  const listenersFresh = !!discoveryCheckedAt && !discoveryError && !discoverySettingsError && !discoverySettingsBusy;
+  const untrackedListeners = hasDiscoveryFolders ? discoveredListeners.filter((listener) => (
+    listener.path !== null && !projects.some((project) => project.id === listener.projectId)
+  )) : [];
+
   const renderProjectsTab = () => (
     <section className="view projects-view">
       <header className="view-header" data-tauri-drag-region>
         <h1>Projects</h1>
         <div className="view-actions">
-          <button className="icon-btn" onClick={() => void refreshStatus()} type="button" title="Refresh status">
+          <button
+            className="icon-btn"
+            onClick={() => void (projectsError ? hydrate() : refreshStatus())}
+            type="button"
+            title="Refresh projects and detected ports"
+            aria-label="Refresh projects and detected ports"
+            disabled={refreshing}
+          >
             <RefreshCw size={18} />
           </button>
           <button className="icon-btn" onClick={() => setActiveTab('settings')} type="button" title="Settings">
@@ -743,8 +847,12 @@ export default function App() {
       </header>
 
       <div className="scroll-area">
+        {projectsError ? <p className="error-text refresh-note" role="status">Could not load projects: {projectsError}</p> : null}
+        {statusError ? <p className="status-note refresh-note" role="status">Status could not be refreshed. Showing the last known state. {statusError}</p> : null}
         {projects.length === 0 ? (
-          <p className="empty">No configured projects yet. Open Settings to add your first one.</p>
+          <p className="empty">
+            {loading ? 'Loading projects…' : projectsError ? 'Your saved projects will appear when loading succeeds.' : 'Track a detected project below, or add one in Settings.'}
+          </p>
         ) : (
           projects.map((project) => {
             const status = statusByProject[project.id];
@@ -823,6 +931,80 @@ export default function App() {
             );
           })
         )}
+
+        <section className="discovery-section" aria-labelledby="discovery-title" aria-busy={discoverySettingsBusy || (hasDiscoveryFolders && refreshing)}>
+          <header className="discovery-header">
+            <h2 id="discovery-title">Detected on this Mac</h2>
+            <span>{discoverySettingsBusy ? 'Updating…' : hasDiscoveryFolders && refreshing ? 'Scanning…' : `${untrackedListeners.length} ${untrackedListeners.length === 1 ? 'port' : 'ports'}`}</span>
+          </header>
+          <p className="discovery-description">Projects in your chosen folders · updates every 5 seconds</p>
+          {discoverySettingsError ? (
+            <div className="settings-load-error">
+              <p className="detect-error" role="status">Discovery folders need attention: {discoverySettingsError}</p>
+              <button className="link-btn" type="button" disabled={discoverySettingsBusy} onClick={retryDiscoverySettings}>Retry</button>
+            </div>
+          ) : null}
+          {discoveryError ? (
+            <p className="detect-error" role="status">
+              Could not scan ports. {discoveryCheckedAt ? 'Showing the last successful scan. ' : ''}{discoveryError}
+            </p>
+          ) : null}
+          {discoveryWarnings.length > 0 ? (
+            <details className="discovery-warnings">
+              <summary>Some folders or process details are unavailable</summary>
+              {discoveryWarnings.map((warning, index) => <p key={`${index}-${warning}`}>{warning}</p>)}
+            </details>
+          ) : null}
+          {!hasDiscoveryFolders && discoverySettings ? (
+            <div className="discovery-empty">
+              <p className="empty small">Choose the folders that contain your projects. Subfolders are included.</p>
+              <button className="section-action-btn" type="button" onClick={() => setActiveTab('settings')}>Choose folders</button>
+            </div>
+          ) : untrackedListeners.length > 0 ? (
+            <div className="discovery-list">
+              {untrackedListeners.map((listener) => {
+                const existingProject = projects.find((project) => (
+                  project.path.replace(/\/+$/, '') === listener.path?.replace(/\/+$/, '')
+                ));
+                const action = existingProject
+                  ? existingProject.port === listener.port ? 'Review' : 'Update port'
+                  : 'Track';
+                return (
+                  <article className="discovery-row" key={`${listener.pid}-${listener.port}-${listener.path}`}>
+                  <div className="discovery-copy">
+                    <div className="discovery-name">
+                      <span
+                        className={`status-dot ${listenersFresh ? 'running' : 'stopped'}`}
+                        role="img"
+                        aria-label={listenersFresh ? 'Listening' : 'Status unavailable'}
+                        title={listenersFresh ? 'Listening' : 'Status unavailable until the next successful scan'}
+                      />
+                      <strong title={listener.path ?? undefined}>{listener.name}</strong>
+                      <span>:{listener.port}</span>
+                    </div>
+                    <p title={listener.path ?? undefined}>
+                      {listener.processName} · PID {listener.pid}
+                    </p>
+                  </div>
+                  {listener.path ? (
+                    <button
+                      className="section-action-btn"
+                      type="button"
+                      disabled={loading || !listenersFresh}
+                      aria-label={`${action}: ${listener.name} on port ${listener.port}`}
+                      onClick={() => trackListener(listener)}
+                    >
+                      {action}
+                    </button>
+                  ) : null}
+                  </article>
+                );
+              })}
+            </div>
+          ) : !discoveryError && !discoverySettingsError ? (
+            <p className="empty small">{!discoverySettings ? 'Loading discovery folders…' : discoverySettingsBusy ? 'Updating discovery folders…' : !discoveryCheckedAt ? 'Scanning your folders for local servers…' : 'No untracked servers found in your folders.'}</p>
+          ) : null}
+        </section>
       </div>
     </section>
   );
@@ -838,6 +1020,57 @@ export default function App() {
       </header>
 
       <div className="scroll-area settings-scroll">
+        <section className="settings-section" aria-labelledby="discovery-folders-title" aria-busy={discoverySettingsBusy}>
+          <div className="settings-section-header">
+            <div className="settings-section-copy">
+              <h2 id="discovery-folders-title">Discovery folders</h2>
+              <p>Detect running projects in these folders and their subfolders.</p>
+            </div>
+            <button
+              className="section-action-btn"
+              type="button"
+              disabled={discoverySettingsBusy || !discoverySettings}
+              onClick={() => void handleAddDiscoveryFolder()}
+            >
+              Add folder
+            </button>
+          </div>
+          {discoverySettingsError ? (
+            <div className="settings-load-error">
+              <p className="detect-error" role="status">{discoverySettingsError}</p>
+              <button className="link-btn" type="button" disabled={discoverySettingsBusy} onClick={retryDiscoverySettings}>Retry</button>
+            </div>
+          ) : null}
+          {folderPickerError ? (
+            <div className="settings-load-error">
+              <p className="detect-error" role="status">Could not choose a folder: {folderPickerError}</p>
+              <button className="link-btn" type="button" disabled={discoverySettingsBusy} onClick={() => void handleAddDiscoveryFolder()}>Try again</button>
+            </div>
+          ) : null}
+          {hasDiscoveryFolders ? (
+            <ul className="discovery-folder-list">
+              {discoverySettings?.folders.map((folder) => (
+                <li key={folder}>
+                  <span title={folder}>{folder}</span>
+                  <button
+                    className="ghost-icon-btn danger"
+                    type="button"
+                    aria-label={`Remove discovery folder ${folder}`}
+                    title="Remove discovery folder"
+                    disabled={discoverySettingsBusy}
+                    onClick={() => void setDiscoveryFolders(discoverySettings.folders.filter((item) => item !== folder))}
+                  >
+                    <X size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="empty small">{discoverySettingsLoading ? 'Loading folders…' : 'No folders selected. Add a folder to start automatic discovery.'}</p>
+          )}
+          {discoveryFoldersBusy ? <p className="detecting-text" role="status">Saving folders…</p> : null}
+        </section>
+
         <section className="settings-section">
           <div className="settings-section-header">
             <div className="settings-section-copy">
@@ -853,6 +1086,8 @@ export default function App() {
               Add project
             </button>
           </div>
+
+          {projectsError ? <p className="detect-error">Could not load projects: {projectsError}</p> : null}
 
           {projects.length === 0 ? (
             <p className="empty small">No projects configured.</p>
@@ -1021,6 +1256,13 @@ export default function App() {
             </div>
           </div>
 
+          {settingsError ? (
+            <div className="settings-load-error">
+              <p className="detect-error">Could not read login settings: {settingsError}</p>
+              <button className="link-btn" type="button" disabled={loading} onClick={() => void hydrate()}>Retry</button>
+            </div>
+          ) : null}
+
           <div className="settings-group">
             <div className="settings-row">
               <div className="settings-row-copy">
@@ -1053,6 +1295,7 @@ export default function App() {
               </div>
               <input
                 type="checkbox"
+                disabled={!settings}
                 checked={settings?.autostartEnabled ?? false}
                 onChange={(event) => void setAutostart(event.target.checked)}
               />

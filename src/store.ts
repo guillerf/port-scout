@@ -6,7 +6,10 @@ import { create } from 'zustand';
 import type {
   ActiveTab,
   AddProjectInput,
+  DiscoveredListener,
+  DiscoverySettings,
   KillResult,
+  ListenerDiscoveryResult,
   Project,
   ProjectDraft,
   ProjectStatus,
@@ -46,8 +49,21 @@ interface AppStore {
   projects: Project[];
   projectDrafts: Record<string, ProjectDraft>;
   statusByProject: Record<string, ProjectStatus>;
+  discoveredListeners: DiscoveredListener[];
+  discoveryWarnings: string[];
+  discoveryError: string | null;
+  discoveryCheckedAt: string | null;
+  discoverySettings: DiscoverySettings | null;
+  discoverySettingsError: string | null;
+  discoverySettingsLoading: boolean;
+  discoveryFoldersBusy: boolean;
+  pendingDiscoveryFolders: string[] | null;
+  projectsError: string | null;
+  statusError: string | null;
+  settingsError: string | null;
   settings: Settings | null;
   loading: boolean;
+  refreshing: boolean;
   checkingUpdates: boolean;
   busyByProject: Record<string, boolean>;
   toast: Toast | null;
@@ -58,7 +74,9 @@ interface AppStore {
   cancelProjectDraft: (projectId: string) => void;
   saveProjectDraft: (projectId: string) => Promise<void>;
   hydrate: () => Promise<void>;
-  refreshStatus: () => Promise<void>;
+  refreshStatus: (force?: boolean) => Promise<void>;
+  loadDiscoverySettings: () => Promise<void>;
+  setDiscoveryFolders: (folders: string[]) => Promise<boolean>;
   addProject: (input: AddProjectInput) => Promise<void>;
   updateProject: (input: UpdateProjectInput) => Promise<boolean>;
   removeProject: (projectId: string) => Promise<void>;
@@ -135,6 +153,26 @@ const updaterErrorMessage = (error: unknown): string => {
 
 let toastId = 0;
 let reorderSeq = 0;
+let hydrateInFlight: Promise<void> | null = null;
+let refreshInFlight: Promise<void> | null = null;
+let refreshQueued: Promise<void> | null = null;
+let discoverySettingsInFlight: Promise<void> | null = null;
+let discoveryGeneration = 0;
+
+const listenerKey = (listener: DiscoveredListener): string => (
+  JSON.stringify([listener.pid, listener.port, listener.path])
+);
+
+function newestListenersFirst(previous: DiscoveredListener[], incoming: DiscoveredListener[]): DiscoveredListener[] {
+  const previousKeys = new Set(previous.map(listenerKey));
+  const incomingByKey = new Map(incoming.map((listener) => [listenerKey(listener), listener]));
+  const added = [...incomingByKey.values()].filter((listener) => !previousKeys.has(listenerKey(listener)));
+  const retained = previous.flatMap((listener) => {
+    const current = incomingByKey.get(listenerKey(listener));
+    return current ? [current] : [];
+  });
+  return [...added, ...retained];
+}
 
 // Apply stored theme immediately on module load (before first render)
 const initialTheme = readStoredTheme();
@@ -146,8 +184,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
   projects: [],
   projectDrafts: {},
   statusByProject: {},
+  discoveredListeners: [],
+  discoveryWarnings: [],
+  discoveryError: null,
+  discoveryCheckedAt: null,
+  discoverySettings: null,
+  discoverySettingsError: null,
+  discoverySettingsLoading: false,
+  discoveryFoldersBusy: false,
+  pendingDiscoveryFolders: null,
+  projectsError: null,
+  statusError: null,
+  settingsError: null,
   settings: null,
   loading: false,
+  refreshing: false,
   checkingUpdates: false,
   busyByProject: {},
   toast: null,
@@ -252,45 +303,134 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   hydrate: async () => {
-    set({ loading: true });
-    try {
-      const [projects, statuses, settings] = await Promise.all([
-        invoke<Project[]>('list_projects'),
-        invoke<ProjectStatus[]>('refresh_status'),
-        invoke<Settings>('get_settings'),
-      ]);
-
-      set({
-        projects: projects,
-        statusByProject: toStatusMap(statuses),
-        settings,
-        loading: false,
-      });
-    } catch (error) {
-      set({
-        loading: false,
-        toast: {
-          id: ++toastId,
-          tone: 'error',
-          message: errorMessage(error),
-        },
-      });
+    if (hydrateInFlight) {
+      return hydrateInFlight;
     }
+
+    set({ loading: true });
+    // Commit each result independently: a login-item or status failure must not
+    // prevent saved projects from appearing, even while discovery is still busy.
+    hydrateInFlight = Promise.all([
+      invoke<Project[]>('list_projects')
+        .then((projects) => set({ projects, projectsError: null }))
+        .catch((error: unknown) => set({ projectsError: errorMessage(error) })),
+      invoke<Settings>('get_settings')
+        .then((settings) => set({ settings, settingsError: null }))
+        .catch((error: unknown) => set({ settingsError: errorMessage(error) })),
+      get().loadDiscoverySettings(),
+    ]).then(() => undefined).finally(() => {
+      hydrateInFlight = null;
+      set({ loading: false });
+    });
+    return hydrateInFlight;
   },
 
-  refreshStatus: async () => {
-    try {
-      const statuses = await invoke<ProjectStatus[]>('refresh_status');
-      set({ statusByProject: toStatusMap(statuses) });
-    } catch (error) {
-      set({
-        toast: {
-          id: ++toastId,
-          tone: 'error',
-          message: errorMessage(error),
-        },
-      });
+  refreshStatus: async (force = false) => {
+    // Polling, tray events and button clicks share one request. A slow system
+    // scan must not build up overlapping lsof processes or overwrite newer data.
+    if (refreshInFlight) {
+      if (force) {
+        // Mutations need a scan started after they finish. Share one queued
+        // scan until it begins; later mutations can queue the next scan.
+        if (!refreshQueued) {
+          refreshQueued = refreshInFlight.then(() => {
+            refreshQueued = null;
+            return get().refreshStatus();
+          });
+        }
+        return refreshQueued;
+      }
+      return refreshInFlight;
     }
+
+    const generation = discoveryGeneration;
+    const canDiscover = !!get().discoverySettings?.folders.length && !get().discoveryFoldersBusy;
+    set({ refreshing: true });
+    refreshInFlight = Promise.all([
+      invoke<ProjectStatus[]>('refresh_status')
+        .then((statuses) => set({ statusByProject: toStatusMap(statuses), statusError: null }))
+        .catch((error: unknown) => set({ statusError: errorMessage(error) })),
+      canDiscover ? invoke<ListenerDiscoveryResult>('discover_listeners')
+        .then((result) => {
+          if (generation !== discoveryGeneration) return;
+          set((state) => ({
+            discoveredListeners: newestListenersFirst(state.discoveredListeners, result.listeners),
+            discoveryWarnings: result.warnings,
+            discoveryError: null,
+            discoveryCheckedAt: new Date().toISOString(),
+          }));
+        })
+        .catch((error: unknown) => {
+          if (generation === discoveryGeneration) set({ discoveryError: errorMessage(error) });
+        }) : Promise.resolve(),
+    ]).then(() => undefined).finally(() => {
+      refreshInFlight = null;
+      set({ refreshing: false });
+    });
+    return refreshInFlight;
+  },
+
+  loadDiscoverySettings: async () => {
+    if (get().discoveryFoldersBusy) return;
+    if (discoverySettingsInFlight) return discoverySettingsInFlight;
+
+    const generation = discoveryGeneration;
+    set({ discoverySettingsLoading: true });
+    discoverySettingsInFlight = invoke<DiscoverySettings>('get_discovery_settings')
+      .then((discoverySettings) => {
+        if (generation !== discoveryGeneration) return;
+        // A reload can observe externally changed folders, so invalidate any
+        // scan that began with the previous filter before committing settings.
+        discoveryGeneration += 1;
+        set({
+          discoverySettings,
+          discoverySettingsError: null,
+          pendingDiscoveryFolders: null,
+          discoveredListeners: [],
+          discoveryWarnings: [],
+          discoveryError: null,
+          discoveryCheckedAt: null,
+        });
+      })
+      .catch((error: unknown) => {
+        if (generation === discoveryGeneration) set({ discoverySettingsError: errorMessage(error) });
+      })
+      .finally(() => {
+        discoverySettingsInFlight = null;
+        set({ discoverySettingsLoading: false });
+      });
+    await discoverySettingsInFlight;
+    await get().refreshStatus(true);
+  },
+
+  setDiscoveryFolders: async (folders) => {
+    if (get().discoveryFoldersBusy || get().discoverySettingsLoading) return false;
+    discoveryGeneration += 1;
+    set({
+      discoveryFoldersBusy: true,
+      discoverySettingsError: null,
+      pendingDiscoveryFolders: [...folders],
+      discoveredListeners: [],
+      discoveryWarnings: [],
+      discoveryError: null,
+      discoveryCheckedAt: null,
+    });
+
+    let saved = false;
+    try {
+      const discoverySettings = await invoke<DiscoverySettings>('set_discovery_folders', { folders });
+      set({ discoverySettings, pendingDiscoveryFolders: null });
+      saved = true;
+    } catch (error) {
+      set({ discoverySettingsError: errorMessage(error) });
+    } finally {
+      // Invalidate scans started while persistence was pending, then request
+      // one after the mutation so the previous folder filter cannot reappear.
+      discoveryGeneration += 1;
+      set({ discoveryFoldersBusy: false });
+    }
+    await get().refreshStatus(true);
+    return saved;
   },
 
   addProject: async (input) => {
@@ -308,7 +448,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         },
       }));
 
-      await get().refreshStatus();
+      await get().refreshStatus(true);
     } catch (error) {
       set({
         loading: false,
@@ -347,7 +487,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         };
       });
 
-      await get().refreshStatus();
+      await get().refreshStatus(true);
       return true;
     } catch (error) {
       set((state) => ({
@@ -395,7 +535,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         };
       });
 
-      await get().refreshStatus();
+      await get().refreshStatus(true);
     } catch (error) {
       set((state) => ({
         busyByProject: {
@@ -485,7 +625,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     try {
       const result = await invoke<StartResult>('start_project_server', { projectId });
-      await get().refreshStatus();
+      await get().refreshStatus(true);
 
       const blockedMessage =
         result.blockedReason === 'already-running'
@@ -540,7 +680,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     try {
       const result = await invoke<KillResult>('kill_project_port', { projectId });
-      await get().refreshStatus();
+      await get().refreshStatus(true);
 
       const blockedMessage =
         result.blockedReason === 'not-running'
@@ -592,7 +732,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setAutostart: async (enabled) => {
     try {
       const settings = await invoke<Settings>('set_autostart', { enabled });
-      set({ settings });
+      set({ settings, settingsError: null });
     } catch (error) {
       set({
         toast: {

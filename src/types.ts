@@ -39,6 +39,25 @@ export interface PortDetectionResult {
   suggestedStartCommand: string | null;
 }
 
+export interface DiscoveredListener {
+  port: number;
+  pid: number;
+  processName: string;
+  name: string;
+  path: string | null;
+  projectId: string | null;
+  suggestedStartCommand: string | null;
+}
+
+export interface ListenerDiscoveryResult {
+  listeners: DiscoveredListener[];
+  warnings: string[];
+}
+
+export interface DiscoverySettings {
+  folders: string[];
+}
+
 export interface UpdateProjectInput {
   id: string;
   name: string;
